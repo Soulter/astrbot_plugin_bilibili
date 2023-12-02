@@ -50,9 +50,10 @@ class BiliMonitorPlugin:
                 self.myThread.start() # 启动线程
             
             if message.startswith("订阅"):
+                if len(message) == 2:
+                    return True, tuple([False, "请输入b站uid！", "bili_monitor"])
                 uid = message[3:] # 获取b站uid
                 if uid.isdigit(): # 判断是否是数字
-                    # uid = int(uid) # 转换成整数
                     group_id = message_obj.group_id # 获取qq群号
                     if uid not in self.subs: # 如果没有订阅过这个up主
                         
@@ -81,14 +82,10 @@ class BiliMonitorPlugin:
                 else: # 如果不是数字
                     return True, tuple([False, "请输入正确的b站uid！", "bili_monitor"]) # 返回失败信息
 
-            elif message == "取消订阅":
+            elif message.startswith("取消订阅"):
                 us_uid = message[5:] # 获取b站uid
-                if us_uid.isdigit(): # 判断是否是数字
-                    # us_uid = int(us_uid) # 转换成整数
-                    pass
-                else:
+                if not us_uid.isdigit(): # 判断是否是数字
                     return True, tuple([False, "请输入正确的b站uid！", "bili_monitor"])
-                
                 group_id = message_obj.group_id
                 if us_uid in self.subs and group_id in self.subs[us_uid]:
                     self.subs[us_uid].remove(group_id)
@@ -107,14 +104,9 @@ class BiliMonitorPlugin:
                         text += f"\n{uid}"
                 return True, tuple([True, text, "bili_monitor"])
             
-
             else:
                 return False, None
-
-        elif platform == "qqchan":
-            """
-            频道处理逻辑(频道暂时只支持回复字符串类型的信息，返回的信息都会被转成字符串，如果不想处理某一个平台的信息，直接返回False, None就行)
-            """
+        else:
             return False, None
 
     """
