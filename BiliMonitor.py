@@ -187,12 +187,25 @@ class BiliMonitorPlugin:
                         date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) # 格式化时间戳
                         # 根据不同的动态类型，获取不同的动态信息，最终得到的是文本和图片
                         if typ == 1: # 转发动态
-                            text = card['item']['content'] # 获取文本
+                            name = card['user']['uname'] if 'user' in card else '未知用户'  # 获取转发者的用户名
+                            face = card['user']['face'] if 'user' in card else ''  # 获取转发者的头像
+                            text = card['item']['content']  # 获取转发者的评论文本
+                            pic = ''  # 初始化图片变量
+
                             if 'origin' in card:
                                 ori = json.loads(card['origin'])
-                                text += "\n【转发了动态】\n"+ori['desc']
-                                pic = ori['first_frame'] # 获取图片
-                            name = card['user']['uname'] # 获取up主名称
+                                text += "\n【转发了动态】\n"
+                                # 检查原始动态是否包含视频特有的字段
+                                if 'aid' in ori or 'cid' in ori:  # 如果原始动态是视频动态
+                                    video_title = ori.get('title', '未知标题')
+                                    video_desc = ori.get('desc', '无简介')
+                                    video_pic = ori.get('pic', '')  # 视频封面
+                                    text += f"视频标题: {video_title}\n视频简介: {video_desc}"
+                                    pic = video_pic  # 设置视频封面为图片
+                                elif 'desc' in ori:  # 如果是其他类型的动态
+                                    text += ori.get('desc', '原始内容不可见')
+                                    pic = ori.get('pic', '')  # 尝试获取图片
+                            name = card['user']['uname']  # 获取up主名称
                         elif typ == 2: # 图文动态
                             text = card['item']['description'] # 获取文本
                             pic = card['item']['pictures'][0]['img_src'] # 获取图片
@@ -202,9 +215,16 @@ class BiliMonitorPlugin:
                             name = card['user']['uname'] # 获取up主名称
                         elif typ == 8: # 视频动态
                             # 没有item
-                            text = card['dynamic'] # 获取文本
-                            pic = card['first_frame'] # 获取图片
-                            name = card['owner']['name'] # 获取up主名称
+                            text = card['dynamic'] if 'dynamic' in card else '无附加文本'  # 获取动态附加的文本
+                            video_title = card['title'] if 'title' in card else '未知标题'  # 获取视频标题
+                            video_desc = card['desc'] if 'desc' in card else '无简介'  # 获取视频简介
+                            pic = card['pic'] if 'pic' in card else ''  # 获取视频封面
+                            name = card['owner']['name'] if 'owner' in card and 'name' in card['owner'] else '未知up主'  # 获取up主名称
+                            return {
+                                "text": f"发布时间: {date}\n视频动态内容: {text}\n视频标题: {video_title}\n视频简介：{video_desc}",
+                                "pic": pic,
+                                "name": name
+                            }
                         elif typ == 64: # 专栏动态
                             text = card['item']['title'] # 获取文本
                             pic = card['item']['image_urls'][0] # 获取图片
