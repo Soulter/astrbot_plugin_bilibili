@@ -1,6 +1,11 @@
-# BiliMonitor
+# BiliMonitor For AstrBot
 
-# QQChannelChatGPT指令补完计划
+Bilibili 订阅提醒插件。
 
-bilibili动态监控插件
+## 适用平台
+- gocq
 
+## 安装方式
+```
+plugin i https://github.com/Soulter/bilimonitor
+```
