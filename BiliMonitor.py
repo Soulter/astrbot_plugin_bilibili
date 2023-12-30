@@ -4,7 +4,10 @@ from nakuru import (
     FriendMessage
 )
 from botpy.message import Message, DirectMessage
-from model.platform.qq import QQ
+try:
+    from model.platform.qq_official import QQOfficial
+except:
+    raise Exception("版本不兼容，请更新 AstrBot。")
 import time
 import threading
 import requests
@@ -39,7 +42,7 @@ class BiliMonitorPlugin:
     例子：做一个名为"yuanshen"的插件；当接收到消息为“原神 可莉”, 如果不想要处理此消息，则返回False, None；如果想要处理，但是执行失败了，返回True, tuple([False, "请求失败啦~", "yuanshen"])
           ；执行成功了，返回True, tuple([True, "结果文本", "yuanshen"])
     """
-    def run(self, message: str, role: str, platform: str, message_obj, qq_platform: QQ):
+    def run(self, message: str, role: str, platform: str, message_obj, qq_platform: QQOfficial):
 
         if platform == "gocq":
             """
@@ -132,7 +135,7 @@ class BiliMonitorPlugin:
         with open("bili_monitor.json", "w") as f:
             json.dump(self.subs, f)
 
-    def monitor_thread(self, qq_platform: QQ):
+    def monitor_thread(self, qq_platform: QQOfficial):
         while True:
             # print(self.subs)
             # print(self.last_dynamic)
