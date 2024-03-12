@@ -1,22 +1,27 @@
 from nakuru.entities.components import *
-from nakuru import (
-    GroupMessage,
-    FriendMessage
-)
-from botpy.message import Message, DirectMessage
-try:
-    from model.platform.qq_gocq import QQGOCQ
-except:
-    raise Exception("版本不兼容，请更新 AstrBot。")
 import time
 import threading
 import requests
 import json
+try:
+    from util.plugin_dev.api.v1.config import *
+    from util.plugin_dev.api.v1.bot import (
+        PluginMetadata,
+        PluginType,
+        AstrMessageEvent,
+        CommandResult,
+        RegisteredPlatform
+    )
+except ImportError:
+    flag_not_support = True
+    print("bilimonitor: 导入接口失败。请升级到 AstrBot 最新版本。")
 
-class BiliMonitorPlugin:
+class Main:
     """
     初始化函数, 可以选择直接pass
     """
+    # 屏蔽词列表
+    BLOCKED_WORDS = ["下单", "元", "链"]
     def __init__(self) -> None:
         self.myThread = None # 线程对象，如果要使用线程，需要在此处定义。在run处定义会被释放掉
         self.last_dynamic = {} # 最新动态字典，键为b站uid，值为动态id
@@ -31,86 +36,79 @@ class BiliMonitorPlugin:
                     self.last_dynamic[uid] = self.get_last_dynamic(uid) # 获取最新动态id并保存
         else: # 如果没有保存的数据
             self.subs = {} # 创建订阅字典
+
+    def run(self, ame: AstrMessageEvent):
+        message = ame.message_str
+        message_obj = ame.message_obj
         
-
-    """
-    入口函数，机器人会调用此函数。
-    参数规范: message: 消息纯文本; role: 身份; platform: 消息平台; message_obj: gocq的消息对象; qq_platform: QQ平台对象，可以通过调用qq_platform.send()直接发送消息。详见Helloworld插件示例
-    参数详情: role为admin或者member; platform为qqchan或者gocq; message_obj为nakuru的GroupMessage对象或者FriendMessage对象或者频道的Message, DirectMessage对象。
-    返回规范: bool: 是否hit到此插件(所有的消息均会调用每一个载入的插件, 如果没有hit到, 则应返回False)
-             Tuple: None或者长度为3的元组。当没有hit到时, 返回None. hit到时, 第1个参数为指令是否调用成功, 第2个参数为返回的消息文本或者gocq的消息链列表, 第3个参数为指令名称
-    例子：做一个名为"yuanshen"的插件；当接收到消息为“原神 可莉”, 如果不想要处理此消息，则返回False, None；如果想要处理，但是执行失败了，返回True, tuple([False, "请求失败啦~", "yuanshen"])
-          ；执行成功了，返回True, tuple([True, "结果文本", "yuanshen"])
-    """
-    def run(self, message: str, role: str, platform: str, message_obj, qq_platform: QQGOCQ):
-
-        if platform == "gocq":
-            """
-            QQ平台指令处理逻辑
-            """
-            if self.myThread is None: # 如果没有启动线程
-                self.myThread = threading.Thread(target=self.monitor_thread, args=(qq_platform,)) # 创建线程对象并传入qq平台对象
-                self.myThread.start() # 启动线程
-            
-            if message.startswith("订阅"):
-                if len(message) == 2:
-                    return True, tuple([False, "请输入b站uid！", "bili_monitor"])
-                uid = message[3:] # 获取b站uid
-                if uid.isdigit(): # 判断是否是数字
+        if self.myThread is None: # 如果没有启动线程
+            self.myThread = threading.Thread(target=self.monitor_thread, args=(ame.platform,)) # 创建线程对象并传入qq平台对象
+            self.myThread.start() # 启动线程
+        
+        if message.startswith("订阅"):
+            if len(message) == 2:
+                return CommandResult(True, True, [Plain("请输入b站uid！")], "bili_monitor")
+            uid = message[3:] # 获取b站uid
+            if uid.isdigit(): # 判断是否是数字
+                try:
                     group_id = message_obj.group_id # 获取qq群号
-                    if uid not in self.subs: # 如果没有订阅过这个up主
+                except BaseException:
+                    group_id = message_obj.sender.user_id
+                if uid not in self.subs: # 如果没有订阅过这个up主
+                    
+                    self.last_dynamic[uid] = self.get_last_dynamic(uid) # 获取最新动态id并保存
+                    dynamic = self.get_dynamic_info(self.last_dynamic[uid], uid) # 获取最新动态信息
+                    if dynamic['name'] == "": # 如果获取失败
+                        return CommandResult(True, True, [Plain(f"获取 uid: {uid} 动态信息失败！")], "bili_monitor")
+                    msg = [Plain(f"订阅成功！你将收到{dynamic['name']}的最新动态~\n===============\n附上上一条最新动态：\n{dynamic['text']}")] # 创建消息列表并添加文本内容
+                    if dynamic['pic']: # 如果有图片内容
+                        msg.append(Image.fromURL(dynamic['pic'])) # 添加图片内容
+                    self.subs[uid] = [group_id] # 创建订阅列表并添加群号
+                    self.save_data() # 保存数据
+                    return CommandResult(
+                        True, True, msg, "bili_monitor"
+                    )
+                else: # 如果已经订阅过这个up主
+                    if group_id not in self.subs[uid]: # 如果这个群没有订阅过
                         
-                        self.last_dynamic[uid] = self.get_last_dynamic(uid) # 获取最新动态id并保存
                         dynamic = self.get_dynamic_info(self.last_dynamic[uid], uid) # 获取最新动态信息
-                        if dynamic['name'] == "": # 如果获取失败
-                            return True, tuple([False, "订阅失败！", "bili_monitor"]) # 返回失败信息
-                        msg = [Plain(f"订阅成功！你将收到{dynamic['name']}的最新动态~\n===============\n附上上一条最新动态：\n{dynamic['text']}")] # 创建消息列表并添加文本内容
+                        msg = [Plain(f"订阅成功！你将收到{dynamic['name']}的最新动态~\n===============\n附上上一条最新动态：\n{dynamic['text']}")] #
                         if dynamic['pic']: # 如果有图片内容
                             msg.append(Image.fromURL(dynamic['pic'])) # 添加图片内容
-                        self.subs[uid] = [group_id] # 创建订阅列表并添加群号
+                        self.subs[uid].append(group_id) # 添加群号到订阅列表
                         self.save_data() # 保存数据
-                        return True, tuple([True, msg, "bili_monitor"]) # 返回成功信息
-                    else: # 如果已经订阅过这个up主
-                        if group_id not in self.subs[uid]: # 如果这个群没有订阅过
-                            
-                            dynamic = self.get_dynamic_info(self.last_dynamic[uid], uid) # 获取最新动态信息
-                            msg = [Plain(f"订阅成功！你将收到{dynamic['name']}的最新动态~\n===============\n附上上一条最新动态：\n{dynamic['text']}")] #
-                            if dynamic['pic']: # 如果有图片内容
-                                msg.append(Image.fromURL(dynamic['pic'])) # 添加图片内容
-                            self.subs[uid].append(group_id) # 添加群号到订阅列表
-                            self.save_data() # 保存数据
-                            return True, tuple([True, msg, "bili_monitor"]) # 返回成功信息
-                        else: # 如果这个群已经订阅过
-                            return True, tuple([False, f"你群已经订阅过{uid}了~", "bili_monitor"]) # 返回失败信息
-                else: # 如果不是数字
-                    return True, tuple([False, "请输入正确的b站uid！", "bili_monitor"]) # 返回失败信息
+                        return CommandResult(
+                            True, True, msg, "bili_monitor"
+                        )
+                    else: # 如果这个群已经订阅过
+                        return CommandResult(True, True, [Plain(f"你群已经订阅过{uid}了~")], "bili_monitor")
+            else: # 如果不是数字
+                return CommandResult(True, True, [Plain("请输入正确的b站uid！")], "bili_monitor")
 
-            elif message.startswith("取消订阅"):
-                us_uid = message[5:] # 获取b站uid
-                if not us_uid.isdigit(): # 判断是否是数字
-                    return True, tuple([False, "请输入正确的b站uid！", "bili_monitor"])
-                group_id = message_obj.group_id
-                if us_uid in self.subs and group_id in self.subs[us_uid]:
-                    self.subs[us_uid].remove(group_id)
-                    if len(self.subs[us_uid]) == 0:
-                        del self.subs[us_uid]
-                    self.save_data()
-                    return True, tuple([True, "取消订阅成功！", "bili_monitor"])
-                else:
-                    return True, tuple([False, "你群没有订阅过这个up主！", "bili_monitor"])
-
-            elif message == "查看订阅":
-                group_id = message_obj.group_id
-                text = "你群订阅的up主有："
-                for uid in self.subs:
-                    if group_id in self.subs[uid]:
-                        text += f"\n{uid}"
-                return True, tuple([True, text, "bili_monitor"])
-            
+        elif message.startswith("取消订阅"):
+            us_uid = message[5:] # 获取b站uid
+            if not us_uid.isdigit(): # 判断是否是数字
+                return CommandResult(True, True, [Plain("请输入正确的b站uid！")], "bili_monitor")
+            group_id = message_obj.group_id
+            if us_uid in self.subs and group_id in self.subs[us_uid]:
+                self.subs[us_uid].remove(group_id)
+                if len(self.subs[us_uid]) == 0:
+                    del self.subs[us_uid]
+                self.save_data()
+                return CommandResult(True, True, [Plain("取消订阅成功！")], "bili_monitor")
             else:
-                return False, None
+                return CommandResult(True, True, [Plain("你群没有订阅过这个up主！")], "bili_monitor")
+
+        elif message == "查看订阅":
+            group_id = message_obj.group_id
+            text = "你群订阅的up主有："
+            for uid in self.subs:
+                if group_id in self.subs[uid]:
+                    text += f"\n{uid}"
+            return CommandResult(True, True, [Plain(text)], "bili_monitor")
+        
         else:
-            return False, None
+            return CommandResult(False, False, None, "bili_monitor")
 
     """
     帮助函数，当用户输入 plugin v 插件名称 时，会调用此函数，返回帮助信息
@@ -135,22 +133,18 @@ class BiliMonitorPlugin:
         with open("bili_monitor.json", "w") as f:
             json.dump(self.subs, f)
 
-    def monitor_thread(self, qq_platform: QQGOCQ):
+    async def monitor_thread(self, platform: RegisteredPlatform):
         while True:
-            # print(self.subs)
-            # print(self.last_dynamic)
             for uid in self.subs: # 遍历所有订阅的up主
                 try:
                     new_dynamic = self.get_last_dynamic(uid) # 获取最新动态id
-                    # print(new_dynamic)
                     if new_dynamic != self.last_dynamic[uid]: # 如果有更新
                         dynamic = self.get_dynamic_info(new_dynamic, uid) # 获取最新动态信息
-                        # print(dynamic)
                         msg = [Plain(f"{dynamic['name']}有新动态啦！\n{dynamic['text']}")] # 创建消息列表并添加文本内容
                         if dynamic['pic']!='': # 如果有图片内容
                             msg.append(Image.fromURL(dynamic['pic'])) # 添加图片内容
                         for group_id in self.subs[uid]: # 遍历所有订阅的群号
-                            qq_platform.send(int(group_id), msg) # 发送消息到群里
+                            await platform.platform_instance.send(int(group_id), msg) # 发送消息到群里
                         self.last_dynamic[uid] = new_dynamic # 更新最新动态id
                 except Exception as e:
                     print(uid, str(e))
@@ -180,6 +174,10 @@ class BiliMonitorPlugin:
                 cards = data['data']['cards'] # 获取动态列表
                 if cards: # 如果有动态
                     try:
+                        card = json.loads(cards[0]['card'])
+                        # 屏蔽词检测
+                        if any(blocked_word in card['item']['content'] for blocked_word in self.BLOCKED_WORDS):
+                            return {"text": "该动态包含屏蔽词，不予转发", "pic": "", "name": ""}
                         if 'type' not in cards[0]['desc']:
                             card = json.loads(cards[0]['card'])
                             res = json.dumps(card, indent=4, ensure_ascii=False)
@@ -219,12 +217,14 @@ class BiliMonitorPlugin:
                         elif typ == 8: # 视频动态
                             # 没有item
                             text = card['dynamic'] if 'dynamic' in card else '无附加文本'  # 获取动态附加的文本
+                            bvid = card['bvid'] if 'bvid' in card else ''
+                            video_url = f"https://www.bilibili.com/video/{bvid}" if bvid else ''
                             video_title = card['title'] if 'title' in card else '未知标题'  # 获取视频标题
                             video_desc = card['desc'] if 'desc' in card else '无简介'  # 获取视频简介
                             pic = card['pic'] if 'pic' in card else ''  # 获取视频封面
                             name = card['owner']['name'] if 'owner' in card and 'name' in card['owner'] else '未知up主'  # 获取up主名称
                             return {
-                                "text": f"发布时间: {date}\n视频动态内容: {text}\n视频标题: {video_title}\n视频简介：{video_desc}",
+                                "text": f"发布时间: {date}\n视频动态内容: {text}\n视频标题: {video_title}\n视频简介: {video_desc}\n视频链接: {video_url}",
                                 "pic": pic,
                                 "name": name
                             }
