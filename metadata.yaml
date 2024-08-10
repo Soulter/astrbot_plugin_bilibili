@@ -1,0 +1,6 @@
+name: astrbot_plugin_bilibili # 这是你的插件的唯一识别名。
+desc: 哔哩哔哩动态推送、视频信息、直播间信息查询插件
+help: 输入 /bili 查看关键词回复帮助。
+version: v1.2.0 # 插件的版本号
+author: Soulter # 作者
+repo: https://github.com/Soulter/astrbot_plugin_bilibili # 插件的仓库地址
