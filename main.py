@@ -12,8 +12,7 @@ DEFAULT_CFG = {
     "bili_sub_list": {} # sub_user -> [{"uid": "uid", "last": "last_dynamic_id"}]
 }
 DATA_PATH = "data/astrbot_plugin_bilibili.json"
-BV_PATTERN = r"(?:https:\/\/www\.bilibili\.com\/video\/)?(BV[\w\d]+)\/?"
-
+BV_PATTERN = r"(?:\?.*)?(?:https?:\/\/)?(?:www\.)?bilibili\.com\/video\/(BV[\w\d]+)\/?(?:\?.*)?"
 settings.timeout = 15
 
 logger = logging.getLogger("astrbot")
@@ -56,7 +55,11 @@ class Main:
         
     async def get_video_info(self, message: AstrMessageEvent, context: Context):
         if not self.check_platform(message): return
-        bvid = re.match(BV_PATTERN, message.message_str).group(1)
+        BV_PATTERN = r"(?:\?.*)?(?:https?:\/\/)?(?:www\.)?bilibili\.com\/video\/(BV[\w\d]+)\/?(?:\?.*)?"
+        match_ = re.search(BV_PATTERN, message.message_str, re.IGNORECASE)
+        if not match_:
+            return
+        bvid = 'BV' + match_.group(1)[2:]
         v = video.Video(bvid=bvid)
         info = await v.get_info()
         online = await v.get_online()
