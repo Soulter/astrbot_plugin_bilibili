@@ -55,7 +55,7 @@ async def create_qrcode(url):
     )
     qr.add_data(url)
     qr.make(fit=True)
-    qr_image = qr.make_image(fill_color="#EC88EC", back_color="#F2F6FF")
+    qr_image = qr.make_image(fill_color="#fb7299", back_color="white")
     url = await image_to_base64(qr_image)
     return url
 

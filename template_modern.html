@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Bilibili Dynamic Card - Modern</title>
+<style>
+    :root {
+        --primary-color: #fb7299;
+        --primary-hover: #fc8bab;
+        --text-main: #18191c;
+        --text-secondary: #9499a0;
+        --bg-body: #f1f2f3;
+        --bg-card: #ffffff;
+        --border-radius-lg: 16px;
+        --border-radius-md: 8px;
+        --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.05);
+        --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    }
+
+    body {
+        margin: 0;
+        padding: 20px;
+        font-family: var(--font-family);
+        background-color: var(--bg-body);
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-start;
+        min-height: 100vh;
+        box-sizing: border-box;
+    }
+
+    .card {
+        background: var(--bg-card);
+        border-radius: var(--border-radius-lg);
+        box-shadow: var(--shadow-card);
+        width: 600px;
+        max-width: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Header Section */
+    .card-header {
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .user-info {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    .avatar-wrapper {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        margin-right: 12px;
+        flex-shrink: 0;
+    }
+
+    .avatar {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 1px solid #f0f0f0;
+    }
+
+    .pendant {
+        position: absolute;
+        top: -20%;
+        left: -20%;
+        width: 140%;
+        height: 140%;
+        pointer-events: none;
+        z-index: 2;
+    }
+
+    .user-details {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .username {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--primary-color);
+        line-height: 1.2;
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .meta-info {
+        font-size: 12px;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .dynamic-label {
+        background: rgba(251, 114, 153, 0.1);
+        color: var(--primary-color);
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .qrcode {
+        width: 64px;
+        height: 64px;
+        object-fit: contain;
+        border-radius: 4px;
+        flex-shrink: 0;
+        margin-left: 16px;
+    }
+
+    /* Content Section */
+    .card-content {
+        padding: 0 24px 20px;
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--text-main);
+    }
+
+    .text-content {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-bottom: 12px;
+    }
+    
+    .text-content a {
+        color: #008ac5;
+        text-decoration: none;
+    }
+    
+    .text-content img {
+        height: 1.4em;
+        vertical-align: text-bottom;
+        margin: 0 2px;
+    }
+
+    /* Article Title for Video/Article Types */
+    .content-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text-main);
+        margin-bottom: 8px;
+        line-height: 1.4;
+    }
+
+    /* Image Grid */
+    .image-grid {
+        display: grid;
+        gap: 6px;
+        border-radius: var(--border-radius-md);
+        overflow: hidden;
+        margin-top: 8px;
+    }
+
+    .image-grid img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        border-radius: 4px;
+        background-color: #f4f5f7;
+        aspect-ratio: 1; /* 强制图片为正方形 */
+    }
+
+    /* Grid Configurations */
+    .grid-1 { grid-template-columns: 1fr; }
+    .grid-1 img { 
+        max-height: 360px; 
+        object-fit: contain; 
+        background: transparent; 
+        border-radius: 8px; 
+        aspect-ratio: auto; /* 单图不强制正方形 */
+    }
+    
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .grid-5 { grid-template-columns: repeat(3, 1fr); }
+    .grid-6 { grid-template-columns: repeat(3, 1fr); }
+    .grid-7 { grid-template-columns: repeat(3, 1fr); }
+    .grid-8 { grid-template-columns: repeat(3, 1fr); }
+    .grid-9 { grid-template-columns: repeat(3, 1fr); }
+
+    /* Forward Card */
+    .forward-card {
+        background-color: #f7f8fa;
+        border-radius: var(--border-radius-md);
+        padding: 12px 16px;
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .forward-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .forward-avatar {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+
+    .forward-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+
+    .forward-content {
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+
+    /* Footer */
+    .card-footer {
+        padding: 12px 24px;
+        border-top: 1px solid #f0f0f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #fafafa;
+    }
+
+    .footer-info {
+        font-size: 12px;
+        color: #c0c0c0;
+    }
+
+    .source-tag {
+        font-size: 12px;
+        color: var(--text-secondary);
+        background: #f1f2f3;
+        padding: 4px 8px;
+        border-radius: 12px;
+        text-decoration: none;
+    }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <!-- Header -->
+    <div class="card-header">
+        <div class="user-info">
+            <div class="avatar-wrapper">
+                <img src="{{ avatar }}" class="avatar" alt="avatar">
+                {% if pendant %}
+                <img src="{{ pendant }}" class="pendant" alt="pendant">
+                {% endif %}
+            </div>
+            <div class="user-details">
+                <div class="username">{{ name | default('AstrBot') }}</div>
+                <div class="meta-info">
+                    <span class="dynamic-label">
+                        {% if type == "DYNAMIC_TYPE_AV" %}投稿视频
+                        {% elif type == "DYNAMIC_TYPE_Article" %}专栏文章
+                        {% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态
+                        {% else %}动态更新{% endif %}
+                    </span>
+                    <!-- <span>2小时前</span> -->
+                </div>
+            </div>
+        </div>
+        {% if qrcode %}
+        <img src="{{ qrcode }}" class="qrcode" alt="QRCode">
+        {% endif %}
+    </div>
+
+    <!-- Content -->
+    <div class="card-content">
+        {% if title and type != "DYNAMIC_TYPE_FORWARD" %}
+        <div class="content-title">{{ title }}</div>
+        {% endif %}
+
+        <div class="text-content">{{ text | default('') | safe }}</div>
+
+        <!-- Forward Content -->
+        {% if forward and forward.name %}
+        <div class="forward-card">
+            <div class="forward-header">
+                {% if forward.avatar %}
+                <img src="{{ forward.avatar }}" class="forward-avatar" alt="forward avatar">
+                {% endif %}
+                <span class="forward-name">{{ forward.name }}</span>
+            </div>
+            
+            <div class="forward-content">
+                {% if forward.title %}
+                <div class="content-title" style="font-size: 14px; margin-bottom: 4px;">{{ forward.title }}</div>
+                {% endif %}
+                
+                <div class="text-content" style="margin-bottom: 8px;">{{ forward.text | safe }}</div>
+                
+                {% if forward.image_urls %}
+                <div class="image-grid grid-{{ forward.image_urls | length }}">
+                    {% for img in forward.image_urls %}
+                    <img src="{{ img }}" alt="forward image">
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Image Grid (Main) -->
+        {% if image_urls and not forward %}
+        <div class="image-grid grid-{{ image_urls | length }}">
+            {% for img in image_urls %}
+            <img src="{{ img }}" alt="image">
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Footer -->
+    <div class="card-footer">
+        <span class="footer-info">Generated by AstrBot</span>
+        <span class="source-tag">Bilibili Plugin</span>
+    </div>
+</div>
+
+</body>
+</html>
+

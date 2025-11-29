@@ -22,7 +22,10 @@ from .renderer import Renderer
 from .bili_client import BiliClient
 from .listener import DynamicListener
 from .data_manager import DataManager
-from .constant import VALID_FILTER_TYPES, BV, LOGO_PATH
+from .constant import (
+    VALID_FILTER_TYPES, BV, LOGO_PATH,
+    CARD_TEMPLATES, DEFAULT_TEMPLATE, get_template_names
+)
 from .tools.bangumi import BangumiTool
 
 
@@ -36,9 +39,12 @@ class Main(Star):
         self.rai = self.cfg.get("rai", True)
         self.enable_parse_miniapp = self.cfg.get("enable_parse_miniapp", True)
         self.enable_parse_BV = self.cfg.get("enable_parse_BV", True)
+        # 读取配置的样式，默认使用 DEFAULT_TEMPLATE
+        self.style = self.cfg.get("style", DEFAULT_TEMPLATE)
 
         self.data_manager = DataManager()
-        self.renderer = Renderer(self, self.rai)
+        # 初始化渲染器时传入样式
+        self.renderer = Renderer(self, self.rai, self.style)
         self.bili_client = BiliClient(self.cfg.get("sessdata"))
         self.dynamic_listener = DynamicListener(
             context=self.context,
@@ -49,6 +55,35 @@ class Main(Star):
         )
         self.context.add_llm_tools(BangumiTool())
         self.dynamic_listener_task = asyncio.create_task(self.dynamic_listener.start())
+
+    @command("卡片样式", alias={"bili_card_style"})
+    @permission_type(PermissionType.ADMIN)
+    async def switch_style(self, event: AstrMessageEvent, style: str = None):
+        """切换动态卡片样式。不带参数查看可用样式列表。"""
+        available = get_template_names()
+        
+        # 不带参数：显示可用样式列表
+        if not style:
+            lines = ["📋 可用的卡片样式："]
+            for tid in available:
+                info = CARD_TEMPLATES[tid]
+                current = " ← 当前" if tid == self.style else ""
+                lines.append(f"  • {tid}: {info['name']}{current}")
+                lines.append(f"    {info['description']}")
+            lines.append(f"\n使用 /卡片样式 <样式名> 切换")
+            return MessageEventResult().message("\n".join(lines))
+        
+        # 带参数：切换样式
+        if style not in available:
+            return MessageEventResult().message(
+                f"样式 '{style}' 不存在。可用样式：{', '.join(available)}"
+            )
+        
+        self.style = style
+        self.renderer.style = style
+        
+        info = CARD_TEMPLATES[style]
+        return MessageEventResult().message(f"✅ 已切换样式为：{info['name']} ({style})")
 
     @regex(BV)
     async def get_video_info(self, event: AstrMessageEvent):
@@ -94,6 +129,7 @@ class Main(Star):
                 f"总共 {online['total']} 人正在观看"
             )
             render_data["image_urls"] = [info["pic"]]
+            render_data["type"] = "DYNAMIC_TYPE_AV" # 添加类型以便新模板正确渲染标签
 
             img_path = await self.renderer.render_dynamic(render_data)
             if img_path:
