@@ -835,11 +835,12 @@ class DynamicListener:
         )
 
     async def _send_live_payload(
-        self, sub_user: str, payload: RenderPayload, sub_data: SubscriptionRecord, permit_atall: bool
+        self, sub_user: str, payload: RenderPayload, sub_data: SubscriptionRecord, permit_atall: bool, is_offline: bool = False
     ) -> None:
         if not self.rai:
             ls = self._compose_plain_push(payload)
-            ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
+            if not is_offline:
+                ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
             await self._send_dynamic(sub_user, ls, category="live")
             return
         img_path = await self.renderer.render_dynamic(payload)
@@ -857,11 +858,13 @@ class DynamicListener:
                     File(file=img_path, name=filename),
                     Plain(f"\n{payload.url}"),
                 ]
-            image_chain = self._add_at_components(image_chain, sub_data, is_live=True, permit_atall=permit_atall)
+            if not is_offline:
+                image_chain = self._add_at_components(image_chain, sub_data, is_live=True, permit_atall=permit_atall)
             await self._send_dynamic(sub_user, image_chain, category="live")
             return
         ls = self._compose_plain_push(payload, render_fail=True)
-        ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
+        if not is_offline:
+            ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
         await self._send_dynamic(sub_user, ls, category="live")
 
     async def _check_atall_permission(self, sub_user: str, enabled: bool) -> bool:
@@ -975,7 +978,7 @@ class DynamicListener:
                 sub_user,
                 bool(sub_data.live_atall or sub_data.at_all) and is_live_started,
             )
-            await self._send_live_payload(sub_user, payload, sub_data, with_atall)
+            await self._send_live_payload(sub_user, payload, sub_data, with_atall, is_offline=is_live_ended)
 
     def _get_dynamic_items(self, dyn: Dict[str, Any], data: SubscriptionRecord):
         """获取动态条目列表。"""
