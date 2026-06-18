@@ -226,7 +226,7 @@ class DynamicListener:
                     if sent < self.dynamic_limit:
                         sent += 1
                         await self._handle_new_dynamic(
-                            sub_user, result.payload, result.dyn_id
+                            sub_user, result.payload, result.dyn_id, sub_data
                         )
                     if result.dyn_id:
                         await self.data_manager.update_last_dynamic_id(
@@ -610,18 +610,24 @@ class DynamicListener:
         sub_user: str,
         payload: Optional[RenderPayload],
         dyn_id: Optional[str] = None,
+        sub_data: Optional[SubscriptionRecord] = None,
     ):
         """处理并发送新的动态通知。"""
         if not payload:
             return
 
+        permit_atall = await self._check_atall_permission(
+            sub_user, bool(sub_data and sub_data.at_all)
+        )
+
         cached = self.render_cache.get(dyn_id) if dyn_id else None
         if cached:
             logger.debug(f"动态推送命中缓存: dyn_id={dyn_id} sub_user={sub_user}")
+            chain_to_send = self._add_at_components(list(cached["chain"]), sub_data, permit_atall=permit_atall)
             try:
                 await self._send_dynamic(
                     sub_user,
-                    cached["chain"],
+                    chain_to_send,
                     send_node=cached["send_node"],
                     category="dynamic",
                     dyn_id=dyn_id,
@@ -640,10 +646,12 @@ class DynamicListener:
                 ls = self._compose_template_push(payload)
             else:
                 ls = self._compose_plain_push(payload)
+            self._cache_render(dyn_id, ls, send_node_flag)
+            chain_to_send = self._add_at_components(list(ls), sub_data, permit_atall=permit_atall)
             try:
                 await self._send_dynamic(
                     sub_user,
-                    ls,
+                    chain_to_send,
                     send_node=send_node_flag,
                     category="dynamic",
                     dyn_id=dyn_id,
@@ -672,10 +680,12 @@ class DynamicListener:
                 filename = f"bilibili_dynamic_{timestamp}.jpg"
                 ls = [File(file=img_path, name=filename)]
             ls.append(Plain(f"\n{url}"))
+            self._cache_render(dyn_id, ls, send_node_flag)
+            chain_to_send = self._add_at_components(list(ls), sub_data, permit_atall=permit_atall)
             try:
                 await self._send_dynamic(
                     sub_user,
-                    ls,
+                    chain_to_send,
                     send_node=send_node_flag,
                     category="dynamic",
                     dyn_id=dyn_id,
@@ -687,8 +697,6 @@ class DynamicListener:
                     f"动态推送失败（已缓存并忽略）: sub_user={sub_user} "
                     f"dyn_id={dyn_id} error={e}"
                 )
-            finally:
-                self._cache_render(dyn_id, ls, send_node_flag)
             return
 
         logger.warning(
@@ -698,10 +706,11 @@ class DynamicListener:
             ls = self._compose_template_push(payload, render_fail=True)
         else:
             ls = self._compose_plain_push(payload, render_fail=True)
+        chain_to_send = self._add_at_components(list(ls), sub_data, permit_atall=permit_atall)
         try:
             await self._send_dynamic(
                 sub_user,
-                ls,
+                chain_to_send,
                 send_node=send_node_flag,
                 category="dynamic",
                 dyn_id=dyn_id,
@@ -750,6 +759,24 @@ class DynamicListener:
     @staticmethod
     def _prepend_atall(chain_parts: List[Any]) -> List[Any]:
         return [AtAll(), Plain(" ")] + chain_parts
+
+    @staticmethod
+    def _add_at_components(
+        chain_parts: List[Any],
+        sub_data: Optional[SubscriptionRecord],
+        is_live: bool = False,
+        permit_atall: bool = True,
+    ) -> List[Any]:
+        if not sub_data:
+            return chain_parts
+        at_components = []
+        should_at_all = (sub_data.at_all or (is_live and sub_data.live_atall)) and permit_atall
+        if should_at_all:
+            at_components.extend([AtAll(), Plain(" ")])
+        elif sub_data.at_sub_users:
+            for uid in sub_data.at_sub_users:
+                at_components.extend([At(qq=uid), Plain(" ")])
+        return at_components + chain_parts
 
     @staticmethod
     def _parse_live_start_timestamp(live_room: Dict[str, Any]) -> int:
@@ -808,12 +835,11 @@ class DynamicListener:
         )
 
     async def _send_live_payload(
-        self, sub_user: str, payload: RenderPayload, with_atall: bool
+        self, sub_user: str, payload: RenderPayload, sub_data: SubscriptionRecord, permit_atall: bool
     ) -> None:
         if not self.rai:
             ls = self._compose_plain_push(payload)
-            if with_atall:
-                ls = self._prepend_atall(ls)
+            ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
             await self._send_dynamic(sub_user, ls, category="live")
             return
         img_path = await self.renderer.render_dynamic(payload)
@@ -831,22 +857,20 @@ class DynamicListener:
                     File(file=img_path, name=filename),
                     Plain(f"\n{payload.url}"),
                 ]
-            if with_atall:
-                image_chain = self._prepend_atall(image_chain)
+            image_chain = self._add_at_components(image_chain, sub_data, is_live=True, permit_atall=permit_atall)
             await self._send_dynamic(sub_user, image_chain, category="live")
             return
         ls = self._compose_plain_push(payload, render_fail=True)
-        if with_atall:
-            ls = self._prepend_atall(ls)
+        ls = self._add_at_components(list(ls), sub_data, is_live=True, permit_atall=permit_atall)
         await self._send_dynamic(sub_user, ls, category="live")
 
-    async def _should_send_live_atall(self, sub_user: str, enabled: bool) -> bool:
+    async def _check_atall_permission(self, sub_user: str, enabled: bool) -> bool:
         if not enabled:
             return False
 
         group_ctx = self._extract_group_session(sub_user)
         if not group_ctx:
-            logger.info(f"live_atall 仅支持群聊会话，当前会话: {sub_user}")
+            logger.info(f"at_all 仅支持群聊会话，当前会话: {sub_user}")
             return False
 
         platform_id, group_id = group_ctx
@@ -857,13 +881,40 @@ class DynamicListener:
 
         client = platform_inst.get_client()
         if not client or not hasattr(client, "call_action"):
-            logger.warning(f"live_atall 失败：平台 {platform_id} 不支持 call_action")
+            logger.warning(f"at_all 失败：平台 {platform_id} 不支持 call_action")
             return False
 
         group_id_param: int | str = int(group_id) if group_id.isdigit() else group_id
-        remain_raw = await client.call_action(
-            "get_group_at_all_remain", group_id=group_id_param
-        )
+
+        # 尝试通过 get_group_member_info 严格检查机器人自身权限（针对 napcat/lagrange 等 get_group_at_all_remain 不可靠的实现）
+        try:
+            bot_info_raw = await client.call_action("get_login_info")
+            bot_info = self._extract_action_data(bot_info_raw)
+            bot_id = bot_info.get("user_id")
+            if bot_id:
+                member_info_raw = await client.call_action(
+                    "get_group_member_info", group_id=group_id_param, user_id=bot_id
+                )
+                member_info = self._extract_action_data(member_info_raw)
+                role = member_info.get("role")
+                if role and role not in ["admin", "owner"]:
+                    logger.info(
+                        f"机器人(UID:{bot_id})在群 {group_id} 角色为 {role}，无 @全体成员 权限"
+                    )
+                    return False
+        except Exception as e:
+            logger.debug(
+                f"通过 get_group_member_info 检查权限失败，降级使用 get_group_at_all_remain: {e}"
+            )
+
+        try:
+            remain_raw = await client.call_action(
+                "get_group_at_all_remain", group_id=group_id_param
+            )
+        except Exception as e:
+            logger.warning(f"调用 get_group_at_all_remain 失败: {e}")
+            return False
+
         remain_data = self._extract_action_data(remain_raw)
         can_at_all = bool(remain_data.get("can_at_all"))
         group_remain = int(remain_data.get("remain_at_all_count_for_group", 0) or 0)
@@ -920,11 +971,11 @@ class DynamicListener:
             await self.data_manager.update_live_status(sub_user, sub_data.uid, False)
         if text:
             payload = self._build_live_payload(live_room, text)
-            with_atall = await self._should_send_live_atall(
+            with_atall = await self._check_atall_permission(
                 sub_user,
-                bool(sub_data.live_atall) and is_live_started,
+                bool(sub_data.live_atall or sub_data.at_all) and is_live_started,
             )
-            await self._send_live_payload(sub_user, payload, with_atall)
+            await self._send_live_payload(sub_user, payload, sub_data, with_atall)
 
     def _get_dynamic_items(self, dyn: Dict[str, Any], data: SubscriptionRecord):
         """获取动态条目列表。"""

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from astrbot.api import logger
 
@@ -32,13 +32,20 @@ class SubscriptionService:
 
     @staticmethod
     def _create_record(
-        uid: int, filter_types: List[str], filter_regex: List[str], live_atall: bool
+        uid: int,
+        filter_types: List[str],
+        filter_regex: List[str],
+        live_atall: bool,
+        at_all: bool = False,
+        at_sub_users: Optional[List[str]] = None,
     ) -> SubscriptionRecord:
         return SubscriptionRecord(
             uid=uid,
             filter_types=list(filter_types),
             filter_regex=list(filter_regex),
             live_atall=live_atall,
+            at_all=at_all,
+            at_sub_users=list(set(at_sub_users)) if at_sub_users else [],
         )
 
     async def _init_last_dynamic(
@@ -62,9 +69,21 @@ class SubscriptionService:
         filter_types: List[str],
         filter_regex: List[str],
         live_atall: bool,
+        at_all: Optional[bool] = None,
+        add_sub_users: Optional[List[str]] = None,
+        rm_sub_users: Optional[List[str]] = None,
+        inherit_filters: bool = False,
     ) -> SubscriptionApplyResult:
         updated = await self.data_manager.update_subscription(
-            sub_user, uid, filter_types, filter_regex, live_atall
+            sub_user,
+            uid,
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=at_all,
+            add_sub_users=add_sub_users,
+            rm_sub_users=rm_sub_users,
+            inherit_filters=inherit_filters,
         )
         if updated:
             record = self.data_manager.get_subscription(sub_user, uid)
@@ -74,7 +93,14 @@ class SubscriptionService:
                 record=record, updated=True, initialized=False
             )
 
-        record = self._create_record(uid, filter_types, filter_regex, live_atall)
+        record = self._create_record(
+            uid,
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=bool(at_all),
+            at_sub_users=add_sub_users,
+        )
         await self.data_manager.add_subscription(sub_user, record)
         initialized = False
         try:

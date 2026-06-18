@@ -149,13 +149,25 @@ class DataManager:
         filter_types: List[str],
         filter_regex: List[str],
         live_atall: bool,
+        at_all: Optional[bool] = None,
+        add_sub_users: Optional[List[str]] = None,
+        rm_sub_users: Optional[List[str]] = None,
+        inherit_filters: bool = False,
     ):
         """
-        更新一个已存在的订阅的过滤条件。
+        更新一个已存在的订阅的过滤条件及 @ 提醒设置。
         """
         sub = self.get_subscription(sub_user, uid)
         if sub:
-            sub.update_filters(filter_types, filter_regex, live_atall)
+            sub.update_filters(
+                filter_types,
+                filter_regex,
+                live_atall,
+                at_all=at_all,
+                add_sub_users=add_sub_users,
+                rm_sub_users=rm_sub_users,
+                inherit_filters=inherit_filters,
+            )
             await self.save()
             return True
         return False

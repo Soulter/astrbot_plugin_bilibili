@@ -23,7 +23,10 @@ VALID_FILTER_TYPES = {
     "forward_lottery",
 }
 LIVE_ATALL_OPTION = "live_atall"
-VALID_SUB_OPTIONS = {LIVE_ATALL_OPTION}
+AT_ALL_OPTION = "at_all"
+AT_SUB_OPTION = "at_sub"
+UNAT_SUB_OPTION = "unat_sub"
+VALID_SUB_OPTIONS = {LIVE_ATALL_OPTION, AT_ALL_OPTION, AT_SUB_OPTION, UNAT_SUB_OPTION}
 DATA_PATH = "data/astrbot_plugin_bilibili.json"
 DEFAULT_CFG = {
     "bili_sub_list": {},  # sub_user -> [{"uid": "uid", "last": "last_dynamic_id", ...}]

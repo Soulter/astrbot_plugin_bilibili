@@ -33,6 +33,9 @@ from .core.constant import (
     RECONNECT_SILENT_THRESHOLD_SECS,
     VALID_FILTER_TYPES,
     VALID_SUB_OPTIONS,
+    AT_ALL_OPTION,
+    AT_SUB_OPTION,
+    UNAT_SUB_OPTION,
     get_template_names,
 )
 from .core.data_manager import DataManager
@@ -171,34 +174,50 @@ class Main(Star):
         await self.data_manager.set_last_success_sub_notify_ts(now_ts)
 
     @staticmethod
-    def _parse_sub_args(input_text: GreedyStr) -> tuple[List[str], List[str], bool]:
+    def _parse_sub_args(
+        input_text: GreedyStr,
+    ) -> tuple[List[str], List[str], bool, bool, bool, bool]:
         args = input_text.strip().split(" ") if input_text.strip() else []
         filter_types: List[str] = []
         filter_regex: List[str] = []
         live_atall = False
+        at_all = False
+        at_sub = False
+        unat_sub = False
 
         for arg in args:
             if arg in VALID_SUB_OPTIONS:
                 if arg == LIVE_ATALL_OPTION:
                     live_atall = True
+                elif arg == AT_ALL_OPTION:
+                    at_all = True
+                elif arg == AT_SUB_OPTION:
+                    at_sub = True
+                elif arg == UNAT_SUB_OPTION:
+                    unat_sub = True
                 continue
             if arg in VALID_FILTER_TYPES:
                 filter_types.append(arg)
             else:
                 filter_regex.append(arg)
 
-        return filter_types, filter_regex, live_atall
+        return filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub
 
     @staticmethod
     def _build_filter_desc(
-        filter_types: List[str], filter_regex: List[str], live_atall: bool
+        filter_types: List[str], filter_regex: List[str], live_atall: bool, at_all: bool = False, at_sub_users_len: int = 0
     ) -> str:
         filter_desc = ""
         if filter_types:
             filter_desc += f"<br>过滤类型: {', '.join(filter_types)}"
         if filter_regex:
             filter_desc += f"<br>过滤正则: {filter_regex}"
-        filter_desc += f"<br>直播开播@全体: {'开启' if live_atall else '关闭'}"
+        if live_atall:
+            filter_desc += f"<br>直播开播@全体: 开启"
+        if at_all:
+            filter_desc += f"<br>@全体成员: 开启"
+        if at_sub_users_len > 0:
+            filter_desc += f"<br>@特定订阅者人数: {at_sub_users_len}"
         return filter_desc
 
     @staticmethod
@@ -250,9 +269,21 @@ class Main(Star):
         filter_types: List[str],
         filter_regex: List[str],
         live_atall: bool,
+        at_all: bool | None = None,
+        add_sub_users: List[str] | None = None,
+        rm_sub_users: List[str] | None = None,
+        inherit_filters: bool = False,
     ) -> Tuple[bool, str]:
         result = await self.subscription_service.add_or_update(
-            sub_user, uid_int, filter_types, filter_regex, live_atall
+            sub_user,
+            uid_int,
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=at_all,
+            add_sub_users=add_sub_users,
+            rm_sub_users=rm_sub_users,
+            inherit_filters=inherit_filters,
         )
         if result.updated:
             option_desc = "开启" if live_atall else "关闭"
@@ -413,17 +444,44 @@ class Main(Star):
 
     @command("bili_sub", alias={"订阅动态"})
     async def dynamic_sub(self, event: AstrMessageEvent, uid: str, input: GreedyStr):
-        filter_types, filter_regex, live_atall = self._parse_sub_args(input)
+        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = self._parse_sub_args(input)
+
+        if at_all and not event.is_admin():
+            if event.role not in ("admin", "owner", "founder"):
+                return MessageEventResult().message("权限不足：只有管理员可以设置 @全体成员。")
 
         sub_user = event.unified_msg_origin
         if not uid.isdigit():
             return MessageEventResult().message("UID 格式错误")
         uid_int = int(uid)
 
+        inherit_filters = False
+        if not filter_types and not filter_regex and (at_all or at_sub or unat_sub):
+            inherit_filters = True
+
+        add_sub_users = [event.get_sender_id()] if at_sub else None
+        rm_sub_users = [event.get_sender_id()] if unat_sub else None
+
+        warning = ""
+        if (at_all or live_atall) and getattr(event, "get_group_id", lambda: None)():
+            permit_atall = await self.dynamic_listener._check_atall_permission(sub_user, True)
+            if not permit_atall:
+                warning = "\n⚠️ 注意：机器人目前在本会话无 @全体成员 的权限，此项设置可能不会生效（请给予机器人管理员权限）。"
+
         updated, update_msg = await self._apply_subscription(
-            sub_user, uid_int, filter_types, filter_regex, live_atall
+            sub_user,
+            uid_int,
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=at_all if at_all else None,
+            add_sub_users=add_sub_users,
+            rm_sub_users=rm_sub_users,
+            inherit_filters=inherit_filters,
         )
         if updated:
+            if warning:
+                update_msg += warning
             return MessageEventResult().message(update_msg)
 
         try:
@@ -436,7 +494,16 @@ class Main(Star):
                 f"订阅成功，但获取 UP 主信息失败: {msg}"
             )
 
-        filter_desc = self._build_filter_desc(filter_types, filter_regex, live_atall)
+        filter_desc = self._build_filter_desc(
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=at_all,
+            at_sub_users_len=len(add_sub_users or []),
+        )
+        if warning:
+            filter_desc += warning.replace("\n", "<br>")
+
         payload = self._build_subscription_payload(
             uid_int,
             str(usr_info.get("name", "Unknown")),
@@ -473,7 +540,11 @@ class Main(Star):
                 if uid_sub_data.filter_regex:
                     filters.append(f"过滤正则: {uid_sub_data.filter_regex}")
                 if uid_sub_data.live_atall:
-                    filters.append("直播@全体: live_atall")
+                    filters.append("直播@全体: 开启")
+                if uid_sub_data.at_all:
+                    filters.append("@全体成员: 开启")
+                if uid_sub_data.at_sub_users:
+                    filters.append(f"@订阅者: [{', '.join(uid_sub_data.at_sub_users)}]")
                 if filters:
                     ret += f"   {'｜'.join(filters)}\n"
             return MessageEventResult().message(ret)
@@ -514,16 +585,36 @@ class Main(Star):
             return MessageEventResult().message(
                 "请提供正确的UMO与UID。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
             )
-        filter_types, filter_regex, live_atall = self._parse_sub_args(input)
+        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = self._parse_sub_args(input)
         uid_int = int(uid)
 
+        inherit_filters = False
+        if not filter_types and not filter_regex and (at_all or at_sub or unat_sub):
+            inherit_filters = True
+
+        warning = ""
+        if at_all or live_atall:
+            permit_atall = await self.dynamic_listener._check_atall_permission(umo, True)
+            if not permit_atall:
+                warning = "\n⚠️ 注意：机器人目前在目标会话无 @全体成员 的权限，此项设置可能不会生效（请检查机器人权限）。"
+
         updated, update_msg = await self._apply_subscription(
-            umo, uid_int, filter_types, filter_regex, live_atall
+            umo,
+            uid_int,
+            filter_types,
+            filter_regex,
+            live_atall,
+            at_all=True if at_all else None,
+            add_sub_users=None,
+            rm_sub_users=None,
+            inherit_filters=inherit_filters,
         )
         if updated:
+            if warning:
+                update_msg += warning
             return MessageEventResult().message(update_msg)
         return MessageEventResult().message(
-            f"订阅完成，已为{umo}添加订阅{uid_int}，详情见日志。"
+            f"订阅完成，已为{umo}添加订阅{uid_int}，详情见日志。{warning}"
         )
 
     @permission_type(PermissionType.ADMIN)
@@ -596,9 +687,13 @@ class Main(Star):
         if not dyn:
             return MessageEventResult().message("未获取到动态数据，请稍后重试。")
 
+        sub_data = self.data_manager.get_subscription(sub_user, uid_int)
+        if not sub_data:
+            sub_data = SubscriptionRecord(uid=uid_int)
+
         result_list = self.dynamic_listener._parse_and_filter_dynamics(
             dyn,
-            SubscriptionRecord(uid=uid_int),
+            sub_data,
         )
 
         render_data: RenderPayload | None = None
@@ -615,7 +710,7 @@ class Main(Star):
             )
 
         # 测试命令需要每次基于当前代码重新构造消息，避免命中同 dyn_id 的历史缓存。
-        await self.dynamic_listener._handle_new_dynamic(sub_user, render_data, None)
+        await self.dynamic_listener._handle_new_dynamic(sub_user, render_data, None, sub_data=sub_data)
         event.stop_event()
 
     async def terminate(self):
