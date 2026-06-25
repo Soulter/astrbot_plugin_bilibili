@@ -138,6 +138,8 @@ class DataManager:
             existing.recent_ids = list(sub_data.recent_ids)
             existing.live_atall = sub_data.live_atall
             existing.last_live_start_ts = sub_data.last_live_start_ts
+            existing.at_all = sub_data.at_all
+            existing.at_sub_users = list(sub_data.at_sub_users)
         else:
             all_subs[sub_user].append(sub_data)
         await self.save()
