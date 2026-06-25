@@ -23,6 +23,8 @@ from bilibili_api import login_v2
 
 from .bili_client import BiliClient
 from .core.constant import (
+    AT_ALL_OPTION,
+    AT_SUB_OPTION,
     BV,
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
@@ -31,11 +33,9 @@ from .core.constant import (
     RECENT_DYNAMIC_CACHE,
     RECONNECT_SILENT_PADDING_SECS,
     RECONNECT_SILENT_THRESHOLD_SECS,
+    UNAT_SUB_OPTION,
     VALID_FILTER_TYPES,
     VALID_SUB_OPTIONS,
-    AT_ALL_OPTION,
-    AT_SUB_OPTION,
-    UNAT_SUB_OPTION,
     get_template_names,
 )
 from .core.data_manager import DataManager
@@ -205,7 +205,11 @@ class Main(Star):
 
     @staticmethod
     def _build_filter_desc(
-        filter_types: List[str], filter_regex: List[str], live_atall: bool, at_all: bool = False, at_sub_users_len: int = 0
+        filter_types: List[str],
+        filter_regex: List[str],
+        live_atall: bool,
+        at_all: bool = False,
+        at_sub_users_len: int = 0,
     ) -> str:
         filter_desc = ""
         if filter_types:
@@ -213,11 +217,14 @@ class Main(Star):
         if filter_regex:
             filter_desc += f"<br>过滤正则: {filter_regex}"
         if live_atall:
-            filter_desc += f"<br>直播开播@全体: 开启"
+            filter_desc += "<br>直播开播@全体: 开启"
+        else:
+            filter_desc += "<br>直播开播@全体: 关闭"
         if at_all:
-            filter_desc += f"<br>@全体成员: 开启"
-        if at_sub_users_len > 0:
-            filter_desc += f"<br>@特定订阅者人数: {at_sub_users_len}"
+            filter_desc += "<br>@全体成员: 开启"
+        else:
+            filter_desc += "<br>@全体成员: 关闭"
+        filter_desc += f"<br>@特定订阅者人数: {at_sub_users_len}"
         return filter_desc
 
     @staticmethod
@@ -444,11 +451,15 @@ class Main(Star):
 
     @command("bili_sub", alias={"订阅动态"})
     async def dynamic_sub(self, event: AstrMessageEvent, uid: str, input: GreedyStr):
-        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = self._parse_sub_args(input)
+        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = (
+            self._parse_sub_args(input)
+        )
 
-        if at_all and not event.is_admin():
+        if (at_all or live_atall) and not event.is_admin():
             if event.role not in ("admin", "owner", "founder"):
-                return MessageEventResult().message("权限不足：只有管理员可以设置 @全体成员。")
+                return MessageEventResult().message(
+                    "权限不足：只有管理员可以设置 @全体成员 相关选项。"
+                )
 
         sub_user = event.unified_msg_origin
         if not uid.isdigit():
@@ -464,7 +475,9 @@ class Main(Star):
 
         warning = ""
         if (at_all or live_atall) and getattr(event, "get_group_id", lambda: None)():
-            permit_atall = await self.dynamic_listener._check_atall_permission(sub_user, True)
+            permit_atall = await self.dynamic_listener._check_atall_permission(
+                sub_user, True
+            )
             if not permit_atall:
                 warning = "\n⚠️ 注意：机器人目前在本会话无 @全体成员 的权限，此项设置可能不会生效（请给予机器人管理员权限）。"
 
@@ -541,8 +554,12 @@ class Main(Star):
                     filters.append(f"过滤正则: {uid_sub_data.filter_regex}")
                 if uid_sub_data.live_atall:
                     filters.append("直播@全体: 开启")
+                else:
+                    filters.append("直播@全体: 关闭")
                 if uid_sub_data.at_all:
                     filters.append("@全体成员: 开启")
+                else:
+                    filters.append("@全体成员: 关闭")
                 if uid_sub_data.at_sub_users:
                     filters.append(f"@订阅者: [{', '.join(uid_sub_data.at_sub_users)}]")
                 if filters:
@@ -585,7 +602,9 @@ class Main(Star):
             return MessageEventResult().message(
                 "请提供正确的UMO与UID。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
             )
-        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = self._parse_sub_args(input)
+        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = (
+            self._parse_sub_args(input)
+        )
         uid_int = int(uid)
 
         inherit_filters = False
@@ -594,7 +613,9 @@ class Main(Star):
 
         warning = ""
         if at_all or live_atall:
-            permit_atall = await self.dynamic_listener._check_atall_permission(umo, True)
+            permit_atall = await self.dynamic_listener._check_atall_permission(
+                umo, True
+            )
             if not permit_atall:
                 warning = "\n⚠️ 注意：机器人目前在目标会话无 @全体成员 的权限，此项设置可能不会生效（请检查机器人权限）。"
 
@@ -710,7 +731,9 @@ class Main(Star):
             )
 
         # 测试命令需要每次基于当前代码重新构造消息，避免命中同 dyn_id 的历史缓存。
-        await self.dynamic_listener._handle_new_dynamic(sub_user, render_data, None, sub_data=sub_data)
+        await self.dynamic_listener._handle_new_dynamic(
+            sub_user, render_data, None, sub_data=sub_data
+        )
         event.stop_event()
 
     async def terminate(self):
