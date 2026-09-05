@@ -1,8 +1,6 @@
 import asyncio
 import json
-import os
 import re
-import tempfile
 import time
 from typing import List, Tuple
 
@@ -19,9 +17,9 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Image, Plain
 from astrbot.core.star.filter.command import GreedyStr
-from bilibili_api import login_v2
 
 from .bili_client import BiliClient
+from .core.bili_login import BiliLoginError, BiliQrLoginClient
 from .core.constant import (
     AT_ALL_OPTION,
     AT_SUB_OPTION,
@@ -306,43 +304,34 @@ class Main(Star):
                 "仅支持管理员在私聊中使用'/bili_login'指令。"
             )
 
-        login_obj = login_v2.QrCodeLogin()
-        await login_obj.generate_qrcode()
-
-        # 获取二维码图片路径
-        qr_path = os.path.join(tempfile.gettempdir(), "qrcode.png")
-
-        await event.send(
-            MessageChain()
-            .message("请使用 Bilibili App 扫描下方二维码登录：")
-            .file_image(qr_path)
-        )
-
-        # 轮询状态
         try:
+            login_client = BiliQrLoginClient(proxy=self.proxy)
+            qrcode_info = await login_client.generate_qrcode()
+
+            await event.send(
+                MessageChain()
+                .message("请使用 Bilibili App 扫描下方二维码登录：")
+                .file_image(qrcode_info.image_path)
+            )
+
             while True:
-                state = await login_obj.check_state()
-                if state == login_v2.QrCodeLoginEvents.DONE:
-                    credential = login_obj.get_credential()
-                    # 保存凭据
-                    self.bili_client.credential = credential
-                    cred_dict = self.bili_client.get_credential_dict()
-                    if cred_dict is not None:
-                        await self.data_manager.set_credential(cred_dict)
-                        self._start_tasks()
-                        await event.send(MessageChain().message("✅ 登录成功！"))
-                    else:
-                        await event.send(
-                            MessageChain().message("❌ 登录失败：无法获取凭据。")
-                        )
+                result = await login_client.poll()
+                if result.is_done:
+                    self.bili_client.set_credential(result.credential)
+                    await self.data_manager.set_credential(result.credential)
+                    self._start_tasks()
+                    await event.send(MessageChain().message("✅ 登录成功！"))
                     break
-                elif state == login_v2.QrCodeLoginEvents.TIMEOUT:
+                if result.is_timeout:
                     await event.send(
                         MessageChain().message("❌ 登录超时，请重新执行 /bili_login。")
                     )
                     break
 
                 await asyncio.sleep(2)
+        except BiliLoginError as e:
+            logger.error(f"登录过程中发生错误: {e}")
+            await event.send(MessageChain().message(f"❌ 登录失败: {str(e)}"))
         except Exception as e:
             logger.error(f"登录过程中发生错误: {e}")
             await event.send(MessageChain().message(f"❌ 登录失败: {str(e)}"))
