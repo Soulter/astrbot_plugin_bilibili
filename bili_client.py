@@ -73,6 +73,33 @@ class BiliClient:
             "ac_time_value": self.credential.ac_time_value,
         }
 
+    async def logout(self) -> bool:
+        """
+        调用 Bilibili 退出登录接口 (login/exit/v2)，在服务端注销 SESSDATA。
+        仅清除本地保存的凭据无法使服务端的登录态失效，需调用此接口才能彻底登出。
+
+        Returns:
+            bool: 服务端注销是否成功。
+        """
+        if not self.credential:
+            return False
+        self._apply_proxy()
+        try:
+            self.credential.raise_for_no_bili_jct()
+            resp = await Api(
+                url="https://api.bilibili.com/login/exit/v2",
+                method="POST",
+                no_csrf=True,
+                data={"biliCSRF": self.credential.bili_jct},
+                credential=self.credential,
+                ignore_code=True,
+            ).result
+            # 成功时 data 为 {"redirectUrl": ...}；账号未登录 (code -101) 时 data 为 None
+            return isinstance(resp, dict) and "redirectUrl" in resp
+        except Exception as e:
+            logger.error(f"调用退出登录接口失败: {e}")
+            return False
+
     async def check_credential(self) -> bool:
         """
         检查凭据是否有效。

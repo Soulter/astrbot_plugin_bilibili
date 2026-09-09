@@ -339,7 +339,10 @@ class Main(Star):
     @command("bili_logout")
     @permission_type(PermissionType.ADMIN)
     async def bili_logout(self, event: AstrMessageEvent):
-        """登出 Bilibili，清除凭据。"""
+        """登出 Bilibili：在服务端注销凭据，并清除本地保存。"""
+        has_credential = self.bili_client.credential is not None
+        server_logout = has_credential and await self.bili_client.logout()
+
         self.bili_client.credential = None
         await self.data_manager.clear_credential()
         self.bili_client = BiliClient(
@@ -347,7 +350,18 @@ class Main(Star):
         )
         self.dynamic_listener.bili_client = self.bili_client
         self._start_tasks()
-        return MessageEventResult().message("✅ 已登出 Bilibili，凭据已清除。")
+
+        if not has_credential:
+            return MessageEventResult().message(
+                "当前没有已保存的登录凭据，本地配置已重置。"
+            )
+        if server_logout:
+            return MessageEventResult().message(
+                "✅ 已登出 Bilibili：服务端登录态已注销，本地凭据已清除。"
+            )
+        return MessageEventResult().message(
+            "⚠️ 服务端注销未成功（凭据可能已失效），已清除本地保存的凭据。"
+        )
 
     @command("bili_card_style", alias={"卡片样式"})
     @permission_type(PermissionType.ADMIN)
