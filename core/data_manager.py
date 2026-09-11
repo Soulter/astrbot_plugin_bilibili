@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from astrbot.api import logger
@@ -85,8 +86,21 @@ class DataManager:
 
     @staticmethod
     def _write_text(path: str, content: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
+        """以原子替换方式保存"""
+        directory = os.path.dirname(path) or "."
+        fd, temp_path = tempfile.mkstemp(prefix=".astrbot-plugin-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, path)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+            raise
 
     async def save(self):
         payload = json.dumps(self._serialize_data(), ensure_ascii=False, indent=2)

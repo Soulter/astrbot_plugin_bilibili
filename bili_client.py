@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import aiohttp
 from astrbot.api import logger
@@ -100,46 +100,6 @@ class BiliClient:
             logger.error(f"调用退出登录接口失败: {e}")
             return False
 
-    async def check_credential(self) -> bool:
-        """
-        检查凭据是否有效。
-        DEPRECATED: 该方法已废弃。
-        """
-        if not self.credential:
-            return False
-        return await self.credential.check_valid()
-
-    async def refresh_credential(self) -> bool:
-        """
-        刷新凭据。
-        DEPRECATED: 该方法已废弃。
-        """
-        if not self.credential:
-            return False
-        try:
-            if await self.credential.check_refresh():
-                await self.credential.refresh()
-                return True
-        except Exception as e:
-            logger.error(f"刷新凭据失败: {e}")
-        return False
-
-    def start_refresh(
-        self,
-        on_refreshed: Optional[
-            Callable[[Dict[str, Any] | None], Awaitable[None]]
-        ] = None,
-    ):
-        """
-        定时刷新凭据的循环。
-        DEPRECATED: 该方法已废弃。
-        :param on_refreshed: 兼容保留。过去用于刷新成功后的异步回调。
-        """
-        logger.warning(
-            "start_refresh() 已废弃：为避免触发上游异常，已禁用定时刷新凭据任务。"
-        )
-        return
-
     def get_user(self, uid: int) -> user.User:
         """
         根据UID获取一个 User 对象。
@@ -165,7 +125,7 @@ class BiliClient:
         获取视频的详细信息和在线观看人数。
         """
         try:
-            v = video.Video(bvid=bvid)
+            v = video.Video(bvid=bvid, credential=self.credential)
             info = await v.get_info()
             online = await v.get_online()
             return {"info": info, "online": online}

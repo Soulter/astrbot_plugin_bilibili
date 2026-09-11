@@ -25,6 +25,7 @@ from .core.constant import (
     AT_SUB_OPTION,
     BV,
     CARD_TEMPLATES,
+    CREDENTIAL_MAINTENANCE_INTERVAL_SECS,
     DEFAULT_TEMPLATE,
     LIVE_ATALL_OPTION,
     LOGO_PATH,
@@ -35,6 +36,11 @@ from .core.constant import (
     VALID_FILTER_TYPES,
     VALID_SUB_OPTIONS,
     get_template_names,
+)
+from .core.credential_lifecycle import (
+    CredentialLifecycle,
+    CredentialRefreshResult,
+    CredentialRefreshStatus,
 )
 from .core.data_manager import DataManager
 from .core.models import RenderPayload, SubscriptionRecord
@@ -87,6 +93,13 @@ class Main(Star):
                 sessdata=self.cfg.get("sessdata"), proxy=self.proxy
             )
 
+        self.credential_lifecycle = CredentialLifecycle(
+            client_supplier=lambda: self.bili_client,
+            credential_saver=self.data_manager.set_credential,
+            has_managed_credential=lambda: self.data_manager.get_credential()
+            is not None,
+        )
+
         self.dynamic_listener = DynamicListener(
             context=self.context,
             data_manager=self.data_manager,
@@ -127,8 +140,45 @@ class Main(Star):
         """启动或重启后台任务。"""
         if hasattr(self, "dynamic_listener_task") and self.dynamic_listener_task:
             self.dynamic_listener_task.cancel()
+        if (
+            hasattr(self, "credential_maintenance_task")
+            and self.credential_maintenance_task
+        ):
+            self.credential_maintenance_task.cancel()
 
         self.dynamic_listener_task = asyncio.create_task(self.dynamic_listener.start())
+        self.credential_maintenance_task = asyncio.create_task(
+            self._credential_maintenance_loop()
+        )
+
+    async def _credential_maintenance_loop(self) -> None:
+        """低频维护扫码登录后保存的 Bilibili 凭据。"""
+        while True:
+            try:
+                result = await self.credential_lifecycle.refresh_if_required()
+                self._log_credential_refresh_result(result)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Bilibili 凭据维护发生未预期错误: "
+                    f"{type(exc).__name__}"
+                )
+            await asyncio.sleep(CREDENTIAL_MAINTENANCE_INTERVAL_SECS)
+
+    @staticmethod
+    def _log_credential_refresh_result(result: CredentialRefreshResult) -> None:
+        if result.status == CredentialRefreshStatus.REFRESHED:
+            logger.info("Bilibili 登录凭据已按服务端要求刷新。")
+        elif result.status == CredentialRefreshStatus.RELOGIN_REQUIRED:
+            logger.warning(
+                "Bilibili 登录凭据无法自动刷新，请管理员使用 /bili_login 重新登录。"
+            )
+        elif result.status == CredentialRefreshStatus.FAILED:
+            logger.warning(
+                "Bilibili 登录凭据维护失败，将在下个维护周期重试。"
+                f"原因类型: {result.reason}"
+            )
 
     def _compute_reconnect_silent_duration(self) -> int:
         uid_count = len(self.dynamic_listener._build_uid_targets())
@@ -809,4 +859,22 @@ class Main(Star):
             except Exception as e:
                 logger.error(
                     f"Error awaiting cancellation of dynamic_listener task: {e}"
+                )
+
+        if (
+            hasattr(self, "credential_maintenance_task")
+            and self.credential_maintenance_task
+            and not self.credential_maintenance_task.done()
+        ):
+            self.credential_maintenance_task.cancel()
+            try:
+                await self.credential_maintenance_task
+            except asyncio.CancelledError:
+                logger.info(
+                    "bilibili credential maintenance task was successfully cancelled during terminate."
+                )
+            except Exception as e:
+                logger.error(
+                    "Error awaiting cancellation of Bilibili credential maintenance "
+                    f"task: {e}"
                 )
