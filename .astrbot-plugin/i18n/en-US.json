@@ -4,6 +4,12 @@
     "short_desc": "Bilibili video parsing, dynamic/live subscription, bangumi recommendations",
     "desc": "Bilibili dynamic push, video info parsing, live room status notifications, QQ mini-app parsing, and LLM-based Bangumi anime recommendations."
   },
+  "pages": {
+    "subscription-manager": {
+      "title": "Subscription Manager",
+      "description": "View, filter, and maintain Bilibili dynamic subscriptions."
+    }
+  },
   "config": {
     "sessdata": {
       "description": "Bilibili SESSDATA",

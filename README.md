@@ -40,6 +40,12 @@ plugin i https://github.com/Soulter/astrbot_plugin_bilibili
 
 ## 📖 使用说明
 
+### 订阅管理页面
+
+AstrBot `>= 4.26.0` 可在 WebUI 的「插件详情 → 订阅管理」打开 Plugin Page，集中管理会话订阅。
+
+> 新增 Page 目录后请重载插件；UP 主公开资料会在页面中按需查询。
+
 ### 动态订阅指令
 
 | 指令 | 参数 | 说明 | 别名 |

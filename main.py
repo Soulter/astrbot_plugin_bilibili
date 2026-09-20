@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import *
+from astrbot.api.web import error_response, json_response, request
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
 from astrbot.api.event.filter import (
     EventMessageType,
@@ -48,6 +49,7 @@ from .core.utils import create_qrcode, image_to_base64, is_valid_umo
 from .services.dispatcher import SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
 from .services.renderer import Renderer
+from .services.subscription_page_service import SubscriptionPageService
 from .services.subscription_service import SubscriptionService
 from .tools.bgm_daily import BgmDailyTool
 from .tools.bgm_subject import BgmAdvancedSubjectSearchTool, BgmRecommendHotSubjectsTool
@@ -113,6 +115,11 @@ class Main(Star):
             bili_client=self.bili_client,
             parse_dynamics=self.dynamic_listener._parse_and_filter_dynamics,
         )
+        self.subscription_page_service = SubscriptionPageService(
+            data_manager=self.data_manager,
+            subscription_service=self.subscription_service,
+        )
+        self._register_subscription_page_apis()
         llm_tools = (
             BgmAdvancedSubjectSearchTool(
                 token=self.bangumi_token,
@@ -135,6 +142,132 @@ class Main(Star):
         self._configure_reconnect_silent()
 
         self._start_tasks()
+
+    def _register_subscription_page_apis(self) -> None:
+        """注册由订阅管理 Plugin Page 调用的受保护 API。"""
+        plugin_name = "astrbot_plugin_bilibili"
+        self.context.register_web_api(
+            f"/{plugin_name}/subscriptions",
+            self.page_list_subscriptions,
+            ["GET"],
+            "List Bilibili subscriptions for Plugin Page",
+        )
+        self.context.register_web_api(
+            f"/{plugin_name}/status",
+            self.page_subscription_status,
+            ["GET"],
+            "Get Bilibili subscription listener status for Plugin Page",
+        )
+        self.context.register_web_api(
+            f"/{plugin_name}/up/<uid>",
+            self.page_up_info,
+            ["GET"],
+            "Get Bilibili uploader information for Plugin Page",
+        )
+        for action in ("create", "update"):
+            self.context.register_web_api(
+                f"/{plugin_name}/subscriptions/{action}",
+                self.page_save_subscription,
+                ["POST"],
+                f"{action.title()} Bilibili subscription from Plugin Page",
+            )
+        self.context.register_web_api(
+            f"/{plugin_name}/subscriptions/delete",
+            self.page_delete_subscription,
+            ["POST"],
+            "Delete Bilibili subscription from Plugin Page",
+        )
+        self.context.register_web_api(
+            f"/{plugin_name}/sessions/delete-all",
+            self.page_delete_subscription_session,
+            ["POST"],
+            "Delete Bilibili subscription session from Plugin Page",
+        )
+
+    async def page_list_subscriptions(self):
+        """返回订阅管理页面所需的会话与订阅数据。"""
+        keyword = request.query.get("keyword", "")
+        if len(keyword) > 100:
+            return error_response("搜索关键词过长。")
+        return json_response(self.subscription_page_service.list_subscriptions(keyword))
+
+    async def page_subscription_status(self):
+        """返回不包含任何凭据的监听器运行状态。"""
+        task = getattr(self, "dynamic_listener_task", None)
+        return json_response(
+            {
+                "listener_running": bool(task and not task.done()),
+                "last_success_sub_notify_ts": self.data_manager.get_last_success_sub_notify_ts(),
+                "credential_configured": self.bili_client.credential is not None,
+            }
+        )
+
+    async def page_up_info(self, uid: str):
+        """按需查询 UP 主公开资料，供页面新增/编辑订阅时预览。"""
+        if not uid.isdigit() or not 0 < int(uid) <= 9_999_999_999:
+            return error_response("UID 必须是正整数。")
+        info, message = await self.bili_client.get_user_info(int(uid))
+        if not info:
+            return error_response(message or "未找到该 UP 主。", status_code=404)
+        return json_response(
+            {
+                "uid": int(info.get("mid", uid)),
+                "name": str(info.get("name", "Unknown")),
+                "avatar": str(info.get("face", "")),
+                "sex": str(info.get("sex", "保密")),
+                "profile_url": f"https://space.bilibili.com/{int(info.get('mid', uid))}",
+            }
+        )
+
+    async def page_save_subscription(self):
+        """创建或完整覆盖更新一条订阅。"""
+        payload = await request.json(default={})
+        try:
+            result, existed = await self.subscription_page_service.save(payload)
+        except (TypeError, ValueError) as exc:
+            return error_response(str(exc))
+        except Exception as exc:
+            logger.exception("订阅管理页面保存订阅失败")
+            return error_response(f"保存订阅失败：{type(exc).__name__}", status_code=500)
+
+        record = self.subscription_page_service.serialize_record(result.record)
+        return json_response(
+            {
+                "subscription": record,
+                "updated": existed,
+                "initialized": result.initialized,
+            }
+        )
+
+    async def page_delete_subscription(self):
+        """删除单条订阅。"""
+        payload = await request.json(default={})
+        if not isinstance(payload, dict):
+            return error_response("请求体必须是 JSON 对象。")
+        try:
+            deleted = await self.subscription_page_service.delete_subscription(
+                payload.get("umo"), payload.get("uid")
+            )
+        except (TypeError, ValueError) as exc:
+            return error_response(str(exc))
+        if not deleted:
+            return error_response("未找到指定订阅。", status_code=404)
+        return json_response({"deleted": True})
+
+    async def page_delete_subscription_session(self):
+        """精确删除一个 UMO 下的全部订阅。"""
+        payload = await request.json(default={})
+        if not isinstance(payload, dict):
+            return error_response("请求体必须是 JSON 对象。")
+        try:
+            deleted = await self.subscription_page_service.delete_session(
+                payload.get("umo")
+            )
+        except (TypeError, ValueError) as exc:
+            return error_response(str(exc))
+        if not deleted:
+            return error_response("未找到指定会话。", status_code=404)
+        return json_response({"deleted": True})
 
     def _start_tasks(self):
         """启动或重启后台任务。"""

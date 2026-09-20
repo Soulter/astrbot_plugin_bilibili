@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Bilibili 订阅管理</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <a class="skip-link" href="#subscriptions">跳到订阅列表</a>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">▶</span>
+        <div><p class="eyebrow">ASTRBOT · BILIBILI</p><h1>订阅管理</h1></div>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection-state" class="connection-state" role="status"><i></i> 正在连接</span>
+        <button id="refresh-button" class="button button-secondary" type="button" title="刷新数据">刷新</button>
+        <button id="create-button" class="button button-primary" type="button">+ 新建订阅</button>
+      </div>
+    </header>
+
+    <section class="hero" aria-labelledby="page-summary">
+      <div>
+        <p class="eyebrow">推送规则总览</p>
+        <p>按会话管理 Bilibili UP 主订阅、动态筛选与提醒方式。</p>
+      </div>
+      <div class="hero-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
+    </section>
+
+    <section class="metrics" aria-label="订阅统计">
+      <article class="metric-card"><span class="metric-icon pink" aria-hidden="true">◉</span><div><span>订阅总数</span><strong id="stat-subscriptions">—</strong><small>所有会话中的规则</small></div></article>
+      <article class="metric-card"><span class="metric-icon blue" aria-hidden="true">◎</span><div><span>活跃会话</span><strong id="stat-sessions">—</strong><small>正在接收推送</small></div></article>
+      <article class="metric-card"><span class="metric-icon amber" aria-hidden="true">✦</span><div><span>关注 UP 主</span><strong id="stat-ups">—</strong><small>去重后的 UID</small></div></article>
+      <article class="metric-card"><span class="metric-icon mint" aria-hidden="true">♧</span><div><span>提醒规则</span><strong id="stat-notifications">—</strong><small>@全体或指定用户</small></div></article>
+    </section>
+
+    <section class="workspace" aria-label="订阅工作区">
+      <aside class="session-panel" aria-labelledby="sessions-title">
+        <div class="panel-heading"><div><p class="eyebrow">会话</p><h2 id="sessions-title">推送目的地</h2></div><span id="session-count" class="count-badge">0</span></div>
+        <label class="visually-hidden" for="session-filter">过滤会话</label>
+        <input id="session-filter" class="session-filter" type="search" placeholder="搜索会话…" autocomplete="off">
+        <div id="session-list" class="session-list" role="listbox" aria-label="会话列表"></div>
+      </aside>
+
+      <section id="subscriptions" class="table-panel" aria-labelledby="subscriptions-title" tabindex="-1">
+        <div class="panel-heading table-heading"><div><p id="selected-session-caption" class="eyebrow">选择一个会话</p><h2 id="subscriptions-title">订阅规则</h2></div><button id="delete-session-button" class="text-button danger" type="button" disabled>清空此会话</button></div>
+        <div class="table-tools">
+          <label class="search-field" for="subscription-search"><span aria-hidden="true">⌕</span><input id="subscription-search" type="search" placeholder="搜索 UID、UP 主或规则…" autocomplete="off"></label>
+          <span id="result-count" class="result-count" aria-live="polite"></span>
+        </div>
+        <div id="loading-state" class="loading-state" aria-live="polite"><span class="spinner" aria-hidden="true"></span>正在读取订阅数据…</div>
+        <div id="table-wrap" class="table-wrap" hidden>
+          <table>
+            <thead><tr><th scope="col">UP 主</th><th scope="col">动态类型</th><th scope="col">内容筛选</th><th scope="col">提醒方式</th><th scope="col"><span class="visually-hidden">操作</span></th></tr></thead>
+            <tbody id="subscription-body"></tbody>
+          </table>
+        </div>
+        <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">◌</span><h3>这里还没有订阅</h3><p>新建一条规则，开始接收 UP 主动态。</p><button class="button button-primary empty-create" type="button">+ 新建订阅</button></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="subscription-drawer" class="drawer" aria-labelledby="drawer-title" aria-modal="true" role="dialog" hidden>
+    <form id="subscription-form" novalidate>
+      <header class="drawer-header"><div><p id="drawer-kicker" class="eyebrow">新建规则</p><h2 id="drawer-title">添加订阅</h2></div><button id="close-drawer" class="icon-button" type="button" aria-label="关闭抽屉">×</button></header>
+      <div class="drawer-content">
+        <div id="form-message" class="form-message" role="alert" hidden></div>
+        <fieldset class="form-section"><legend>订阅对象</legend>
+          <div class="form-grid">
+            <label>会话 UMO <span aria-hidden="true">*</span><input name="umo" required placeholder="例如 aiocqhttp:GroupMessage:12345" autocomplete="off"><small>推送到的 AstrBot 会话标识。</small></label>
+            <label>UP 主 UID <span aria-hidden="true">*</span><div class="uid-control"><input name="uid" inputmode="numeric" pattern="[0-9]+" required placeholder="例如 2" autocomplete="off"><button id="lookup-up" type="button" class="button button-secondary">查找</button></div><small id="up-preview">输入 UID 后可查找 UP 主。</small></label>
+          </div>
+        </fieldset>
+        <fieldset class="form-section"><legend>动态筛选</legend>
+          <p class="field-hint">未选择类型时，默认接收所有支持的动态类型。</p>
+          <div id="type-options" class="check-grid">
+            <label><input type="checkbox" name="filter_types" value="video"> 过滤视频</label><label><input type="checkbox" name="filter_types" value="draw"> 过滤图文</label><label><input type="checkbox" name="filter_types" value="article"> 过滤专栏</label><label><input type="checkbox" name="filter_types" value="forward"> 过滤转发</label><label><input type="checkbox" name="filter_types" value="lottery"> 过滤抽奖</label><label><input type="checkbox" name="filter_types" value="live"> 过滤直播</label><label><input type="checkbox" name="filter_types" value="live_end"> 仅过滤下播</label><label><input type="checkbox" name="filter_types" value="forward_lottery"> 过滤转发抽奖</label>
+          </div>
+          <label class="full-label">内容过滤正则 <textarea name="filter_regex" rows="3" placeholder="例如 口令" autocomplete="off"></textarea><small>每行一条；命中正则的动态将被过滤。</small></label>
+        </fieldset>
+        <fieldset class="form-section"><legend>提醒方式</legend>
+          <label class="toggle-row"><span><strong>@全体成员</strong><small>群聊中发布动态或开播时尝试 @ 全体。</small></span><input type="checkbox" name="at_all" role="switch"><i aria-hidden="true"></i></label>
+          <label class="toggle-row"><span><strong>仅开播 @ 全体</strong><small>只在该 UP 主开播时尝试 @ 全体。</small></span><input type="checkbox" name="live_atall" role="switch"><i aria-hidden="true"></i></label>
+          <label class="full-label">@指定订阅者 <input name="at_sub_users" placeholder="使用逗号分隔用户 ID" autocomplete="off"><small>动态命中时依次 @ 这些订阅者。</small></label>
+        </fieldset>
+      </div>
+      <footer class="drawer-footer"><button id="cancel-drawer" class="button button-secondary" type="button">取消</button><button id="save-subscription" class="button button-primary" type="submit">保存订阅</button></footer>
+    </form>
+  </aside>
+
+  <div id="confirm-dialog" class="modal-backdrop" role="presentation" hidden><section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description"><span class="confirm-icon" aria-hidden="true">!</span><h2 id="confirm-title">确认操作</h2><p id="confirm-description"></p><div class="confirm-actions"><button id="confirm-cancel" class="button button-secondary" type="button">取消</button><button id="confirm-ok" class="button button-danger" type="button">确认删除</button></div></section></div>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

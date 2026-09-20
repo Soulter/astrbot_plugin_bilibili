@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
@@ -29,6 +30,7 @@ class SubscriptionService:
         self.data_manager = data_manager
         self.bili_client = bili_client
         self.parse_dynamics = parse_dynamics
+        self._mutation_lock = asyncio.Lock()
 
     @staticmethod
     def _create_record(
@@ -74,39 +76,51 @@ class SubscriptionService:
         rm_sub_users: Optional[List[str]] = None,
         inherit_filters: bool = False,
     ) -> SubscriptionApplyResult:
-        updated = await self.data_manager.update_subscription(
-            sub_user,
-            uid,
-            filter_types,
-            filter_regex,
-            live_atall,
-            at_all=at_all,
-            add_sub_users=add_sub_users,
-            rm_sub_users=rm_sub_users,
-            inherit_filters=inherit_filters,
-        )
-        if updated:
-            record = self.data_manager.get_subscription(sub_user, uid)
-            if not record:
-                raise RuntimeError("subscription missing after update")
+        """串行化检查/写入过程，避免指令与 Page 同时创建重复订阅。"""
+        async with self._mutation_lock:
+            updated = await self.data_manager.update_subscription(
+                sub_user,
+                uid,
+                filter_types,
+                filter_regex,
+                live_atall,
+                at_all=at_all,
+                add_sub_users=add_sub_users,
+                rm_sub_users=rm_sub_users,
+                inherit_filters=inherit_filters,
+            )
+            if updated:
+                record = self.data_manager.get_subscription(sub_user, uid)
+                if not record:
+                    raise RuntimeError("subscription missing after update")
+                return SubscriptionApplyResult(
+                    record=record, updated=True, initialized=False
+                )
+
+            record = self._create_record(
+                uid,
+                filter_types,
+                filter_regex,
+                live_atall,
+                at_all=bool(at_all),
+                at_sub_users=add_sub_users,
+            )
+            await self.data_manager.add_subscription(sub_user, record)
+            initialized = False
+            try:
+                initialized = await self._init_last_dynamic(sub_user, uid, record)
+            except Exception as exc:
+                logger.error(f"初始化订阅失败 UID={uid}: {exc}")
             return SubscriptionApplyResult(
-                record=record, updated=True, initialized=False
+                record=record, updated=False, initialized=initialized
             )
 
-        record = self._create_record(
-            uid,
-            filter_types,
-            filter_regex,
-            live_atall,
-            at_all=bool(at_all),
-            at_sub_users=add_sub_users,
-        )
-        await self.data_manager.add_subscription(sub_user, record)
-        initialized = False
-        try:
-            initialized = await self._init_last_dynamic(sub_user, uid, record)
-        except Exception as exc:
-            logger.error(f"初始化订阅失败 UID={uid}: {exc}")
-        return SubscriptionApplyResult(
-            record=record, updated=False, initialized=initialized
-        )
+    async def remove(self, sub_user: str, uid: int) -> bool:
+        """串行化删除操作，避免与同一订阅的创建/更新交叉。"""
+        async with self._mutation_lock:
+            return await self.data_manager.remove_subscription(sub_user, uid)
+
+    async def remove_all_for_session(self, sub_user: str) -> bool:
+        """串行化清空会话操作，避免与同一会话的订阅写入交叉。"""
+        async with self._mutation_lock:
+            return await self.data_manager.remove_all_exact(sub_user)

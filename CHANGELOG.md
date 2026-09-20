@@ -1,3 +1,7 @@
+# v1.7.0
+- 新增 AstrBot Plugin Page，支持集中查看、筛选、新增、编辑和删除 Bilibili 动态订阅。
+- 插件适用的最低 AstrBot 版本提升至 `4.26.0`，以支持 Plugin Pages。
+
 # v1.6.6
 - 修复`/bili_login`获取凭证失败的问题，后续逐步弱化某些依赖的使用
 

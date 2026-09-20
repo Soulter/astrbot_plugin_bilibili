@@ -4,6 +4,12 @@
     "short_desc": "B站视频解析、UP主动态/直播订阅、番剧推荐",
     "desc": "哔哩哔哩动态推送、视频信息解析、直播间状态推送、QQ小程序解析、基于 LLM 的 Bangumi 番剧推荐。"
   },
+  "pages": {
+    "subscription-manager": {
+      "title": "订阅管理",
+      "description": "集中查看、筛选和维护 Bilibili 动态订阅。"
+    }
+  },
   "config": {
     "sessdata": {
       "description": "B站 SESSDATA",

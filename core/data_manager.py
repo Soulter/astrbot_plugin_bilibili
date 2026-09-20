@@ -30,6 +30,8 @@ class DataManager:
                     dst.write(src.read())
             logger.info(f"已将旧数据文件迁移到标准路径: {standard_data_path}")
         self.path = standard_data_path
+        self._write_lock = asyncio.Lock()
+        self._save_lock = asyncio.Lock()
         self.data = self._load_data()
         self._normalize_subscriptions()
         self._normalize_runtime_fields()
@@ -103,8 +105,14 @@ class DataManager:
             raise
 
     async def save(self):
-        payload = json.dumps(self._serialize_data(), ensure_ascii=False, indent=2)
-        await asyncio.to_thread(self._write_text, self.path, payload)
+        """将当前内存快照安全写入磁盘。
+
+        调用方负责在修改数据期间持有 ``_write_lock``；保留此方法的公共性以兼容
+        已有调用点。
+        """
+        async with self._save_lock:
+            payload = json.dumps(self._serialize_data(), ensure_ascii=False, indent=2)
+            await asyncio.to_thread(self._write_text, self.path, payload)
 
     def get_all_subscriptions(self) -> Dict[str, List[SubscriptionRecord]]:
         """
@@ -137,26 +145,25 @@ class DataManager:
         return None
 
     async def add_subscription(self, sub_user: str, sub_data: SubscriptionRecord):
-        """
-        为用户添加一条新的订阅。
-        """
-        all_subs = self.get_all_subscriptions()
-        if sub_user not in all_subs:
-            all_subs[sub_user] = []
-        existing = self.get_subscription(sub_user, sub_data.uid)
-        if existing:
-            existing.last = sub_data.last
-            existing.is_live = sub_data.is_live
-            existing.filter_types = list(sub_data.filter_types)
-            existing.filter_regex = list(sub_data.filter_regex)
-            existing.recent_ids = list(sub_data.recent_ids)
-            existing.live_atall = sub_data.live_atall
-            existing.last_live_start_ts = sub_data.last_live_start_ts
-            existing.at_all = sub_data.at_all
-            existing.at_sub_users = list(sub_data.at_sub_users)
-        else:
-            all_subs[sub_user].append(sub_data)
-        await self.save()
+        """为用户添加一条新的订阅。"""
+        async with self._write_lock:
+            all_subs = self.get_all_subscriptions()
+            if sub_user not in all_subs:
+                all_subs[sub_user] = []
+            existing = self.get_subscription(sub_user, sub_data.uid)
+            if existing:
+                existing.last = sub_data.last
+                existing.is_live = sub_data.is_live
+                existing.filter_types = list(sub_data.filter_types)
+                existing.filter_regex = list(sub_data.filter_regex)
+                existing.recent_ids = list(sub_data.recent_ids)
+                existing.live_atall = sub_data.live_atall
+                existing.last_live_start_ts = sub_data.last_live_start_ts
+                existing.at_all = sub_data.at_all
+                existing.at_sub_users = list(sub_data.at_sub_users)
+            else:
+                all_subs[sub_user].append(sub_data)
+            await self.save()
 
     async def update_subscription(
         self,
@@ -173,20 +180,21 @@ class DataManager:
         """
         更新一个已存在的订阅的过滤条件及 @ 提醒设置。
         """
-        sub = self.get_subscription(sub_user, uid)
-        if sub:
-            sub.update_filters(
-                filter_types,
-                filter_regex,
-                live_atall,
-                at_all=at_all,
-                add_sub_users=add_sub_users,
-                rm_sub_users=rm_sub_users,
-                inherit_filters=inherit_filters,
-            )
-            await self.save()
-            return True
-        return False
+        async with self._write_lock:
+            sub = self.get_subscription(sub_user, uid)
+            if sub:
+                sub.update_filters(
+                    filter_types,
+                    filter_regex,
+                    live_atall,
+                    at_all=at_all,
+                    add_sub_users=add_sub_users,
+                    rm_sub_users=rm_sub_users,
+                    inherit_filters=inherit_filters,
+                )
+                await self.save()
+                return True
+            return False
 
     def get_credential(self) -> Optional[Dict[str, Any]]:
         """
@@ -215,12 +223,11 @@ class DataManager:
         await self.save()
 
     async def clear_credential(self):
-        """
-        清除保存的凭据。
-        """
-        if "credential" in self.data:
-            del self.data["credential"]
-            await self.save()
+        """清除保存的凭据。"""
+        async with self._write_lock:
+            if "credential" in self.data:
+                del self.data["credential"]
+                await self.save()
 
     async def update_last_dynamic_id(self, sub_user: str, uid: int, dyn_id: str):
         """
@@ -241,28 +248,31 @@ class DataManager:
             await self.save()
 
     async def remove_subscription(self, sub_user: str, uid: int) -> bool:
-        """
-        移除一条订阅。
-        """
-        user_subs = self.get_subscriptions_by_user(sub_user)
-        if not user_subs:
-            return False
+        """移除一条订阅。"""
+        async with self._write_lock:
+            user_subs = self.get_subscriptions_by_user(sub_user)
+            if not user_subs:
+                return False
 
-        sub_to_remove = None
-        for sub in user_subs:
-            if sub.uid == uid:
-                sub_to_remove = sub
-                break
+            sub_to_remove = next((sub for sub in user_subs if sub.uid == uid), None)
+            if not sub_to_remove:
+                return False
 
-        if sub_to_remove:
             user_subs.remove(sub_to_remove)
-            # 如果该用户已无任何订阅，可以选择移除该用户键
             if not user_subs:
                 del self.data["bili_sub_list"][sub_user]
             await self.save()
             return True
 
-        return False
+    async def remove_all_exact(self, sub_user: str) -> bool:
+        """精确删除一个 UMO 下的全部订阅，用于受控的管理页面操作。"""
+        async with self._write_lock:
+            all_subs = self.get_all_subscriptions()
+            if sub_user not in all_subs:
+                return False
+            del all_subs[sub_user]
+            await self.save()
+            return True
 
     async def remove_all_for_user(self, sid: str):
         """
