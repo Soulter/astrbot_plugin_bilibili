@@ -7,7 +7,7 @@ from typing import Any
 from ..core.constant import VALID_FILTER_TYPES
 from ..core.data_manager import DataManager
 from ..core.models import SubscriptionRecord
-from ..core.utils import is_valid_umo
+from ..core.utils import is_valid_umo, parse_bilibili_uid
 from .subscription_service import SubscriptionApplyResult, SubscriptionService
 
 MAX_FILTER_REGEX_COUNT = 20
@@ -41,7 +41,7 @@ class SubscriptionPageService:
     def serialize_record(record: SubscriptionRecord) -> dict[str, Any]:
         """将订阅记录转换为可安全返回给 Page 的数据。"""
         return {
-            "uid": record.uid,
+            "uid": str(record.uid),
             "last": record.last,
             "is_live": record.is_live,
             "filter_types": list(record.filter_types),
@@ -99,12 +99,7 @@ class SubscriptionPageService:
         if len(umo) > 300 or not is_valid_umo(umo):
             raise ValueError("UMO 格式无效。")
 
-        raw_uid = payload.get("uid")
-        if isinstance(raw_uid, bool) or not str(raw_uid).isdigit():
-            raise ValueError("UID 必须是正整数。")
-        uid = int(raw_uid)
-        if uid <= 0 or uid > 9_999_999_999:
-            raise ValueError("UID 超出允许范围。")
+        uid = parse_bilibili_uid(payload.get("uid"))
 
         raw_types = payload.get("filter_types", [])
         if not isinstance(raw_types, list) or not all(
@@ -192,9 +187,4 @@ class SubscriptionPageService:
         valid_umo = str(umo or "").strip()
         if len(valid_umo) > 300 or not is_valid_umo(valid_umo):
             raise ValueError("UMO 格式无效。")
-        if isinstance(uid, bool) or not str(uid).isdigit():
-            raise ValueError("UID 必须是正整数。")
-        valid_uid = int(uid)
-        if valid_uid <= 0 or valid_uid > 9_999_999_999:
-            raise ValueError("UID 超出允许范围。")
-        return valid_umo, valid_uid
+        return valid_umo, parse_bilibili_uid(uid)

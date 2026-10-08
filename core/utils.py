@@ -64,6 +64,22 @@ def is_valid_umo(umo: str) -> bool:
     return re.match(pattern, umo) is not None
 
 
+def parse_bilibili_uid(value) -> int:
+    """解析 Bilibili UID，并将无法转换的超长输入转为可控错误。"""
+    if isinstance(value, bool):
+        raise TypeError("UID 必须是正整数。")
+    text = str(value).strip()
+    if not text.isdigit():
+        raise ValueError("UID 必须是正整数。")
+    try:
+        uid = int(text)
+    except ValueError as exc:
+        raise ValueError("UID 数字过长，无法解析。") from exc
+    if uid <= 0:
+        raise ValueError("UID 必须是正整数。")
+    return uid
+
+
 def render_text_to_plain(text: str) -> str:
     """将渲染用的 HTML 片段转换为纯文本。"""
     if not text:

@@ -6,7 +6,6 @@ from typing import List, Tuple
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import *
-from astrbot.api.web import error_response, json_response, request
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
 from astrbot.api.event.filter import (
     EventMessageType,
@@ -17,6 +16,7 @@ from astrbot.api.event.filter import (
     regex,
 )
 from astrbot.api.message_components import Image, Plain
+from astrbot.api.web import error_response, json_response, request
 from astrbot.core.star.filter.command import GreedyStr
 
 from .bili_client import BiliClient
@@ -45,7 +45,12 @@ from .core.credential_lifecycle import (
 )
 from .core.data_manager import DataManager
 from .core.models import RenderPayload, SubscriptionRecord
-from .core.utils import create_qrcode, image_to_base64, is_valid_umo
+from .core.utils import (
+    create_qrcode,
+    image_to_base64,
+    is_valid_umo,
+    parse_bilibili_uid,
+)
 from .services.dispatcher import SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
 from .services.renderer import Renderer
@@ -204,18 +209,21 @@ class Main(Star):
 
     async def page_up_info(self, uid: str):
         """按需查询 UP 主公开资料，供页面新增/编辑订阅时预览。"""
-        if not uid.isdigit() or not 0 < int(uid) <= 9_999_999_999:
-            return error_response("UID 必须是正整数。")
-        info, message = await self.bili_client.get_user_info(int(uid))
+        try:
+            uid_int = parse_bilibili_uid(uid)
+        except (TypeError, ValueError) as exc:
+            return error_response(str(exc))
+        info, message = await self.bili_client.get_user_info(uid_int)
         if not info:
             return error_response(message or "未找到该 UP 主。", status_code=404)
+        resolved_uid = str(info.get("mid") or uid_int)
         return json_response(
             {
-                "uid": int(info.get("mid", uid)),
+                "uid": resolved_uid,
                 "name": str(info.get("name", "Unknown")),
                 "avatar": str(info.get("face", "")),
                 "sex": str(info.get("sex", "保密")),
-                "profile_url": f"https://space.bilibili.com/{int(info.get('mid', uid))}",
+                "profile_url": f"https://space.bilibili.com/{resolved_uid}",
             }
         )
 
