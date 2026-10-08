@@ -1,3 +1,7 @@
+# v1.7.1
+- 修复订阅管理页面无法订阅长UID的用户的问题。[issue#112](https://github.com/Soulter/astrbot_plugin_bilibili/issues/112)
+- 支持在订阅管理页面上传或恢复渲染卡片使用的自定义头像。[issue#113](https://github.com/Soulter/astrbot_plugin_bilibili/issues/113)
+
 # v1.7.0
 - 新增 AstrBot Plugin Page，支持集中查看、筛选、新增、编辑和删除 Bilibili 动态订阅。
 - 插件适用的最低 AstrBot 版本提升至 `4.26.0`，以支持 Plugin Pages。

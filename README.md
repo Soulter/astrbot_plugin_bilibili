@@ -42,7 +42,7 @@ plugin i https://github.com/Soulter/astrbot_plugin_bilibili
 
 ### 订阅管理页面
 
-AstrBot `>= 4.26.0` 可在 WebUI 的「插件详情 → 订阅管理」打开 Plugin Page，集中管理会话订阅。
+AstrBot `>= 4.26.0` 可在 WebUI 的「插件详情 → 订阅管理」打开 Plugin Page，集中管理会话订阅。页面还支持上传自定义渲染头像，图片会保存到插件数据目录并替换订阅成功、直播和视频信息卡片中的默认头像；可随时恢复默认图片。
 
 > 新增 Page 目录后请重载插件；UP 主公开资料会在页面中按需查询。
 
