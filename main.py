@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import time
+from pathlib import Path
 from typing import List, Tuple
 
 from astrbot.api import AstrBotConfig, logger
@@ -53,6 +54,7 @@ from .core.utils import (
 )
 from .services.dispatcher import SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
+from .services.logo_service import LogoService
 from .services.renderer import Renderer
 from .services.subscription_page_service import SubscriptionPageService
 from .services.subscription_service import SubscriptionService
@@ -81,6 +83,10 @@ class Main(Star):
             recent_dynamic_cache=self.cfg.get(
                 "recent_dynamic_cache", RECENT_DYNAMIC_CACHE
             )
+        )
+        self.logo_service = LogoService(
+            default_path=LOGO_PATH,
+            data_dir=Path(self.data_manager.path).parent,
         )
         self.renderer = Renderer(self, self.rai, self.style)
         self._last_notify_write_ts = self.data_manager.get_last_success_sub_notify_ts()
@@ -114,6 +120,7 @@ class Main(Star):
             renderer=self.renderer,
             dispatcher=self.notification_dispatcher,
             cfg=self.cfg,
+            logo_path_provider=self.logo_service.get_active_path,
         )
         self.subscription_service = SubscriptionService(
             data_manager=self.data_manager,
@@ -169,6 +176,24 @@ class Main(Star):
             ["GET"],
             "Get Bilibili uploader information for Plugin Page",
         )
+        self.context.register_web_api(
+            f"/{plugin_name}/logo",
+            self.page_logo,
+            ["GET"],
+            "Get Bilibili render logo for Plugin Page",
+        )
+        self.context.register_web_api(
+            f"/{plugin_name}/logo/upload",
+            self.page_logo_upload,
+            ["POST"],
+            "Upload Bilibili render logo from Plugin Page",
+        )
+        self.context.register_web_api(
+            f"/{plugin_name}/logo/reset",
+            self.page_logo_reset,
+            ["POST"],
+            "Reset Bilibili render logo from Plugin Page",
+        )
         for action in ("create", "update"):
             self.context.register_web_api(
                 f"/{plugin_name}/subscriptions/{action}",
@@ -206,6 +231,38 @@ class Main(Star):
                 "credential_configured": self.bili_client.credential is not None,
             }
         )
+
+    async def page_logo(self):
+        """返回当前渲染头像的预览和自定义状态。"""
+        return json_response(self.logo_service.get_status())
+
+    async def page_logo_upload(self):
+        """接收并校验 Plugin Page 上传的渲染头像。"""
+        try:
+            files = await request.files()
+            upload = files.get("file")
+            result = await self.logo_service.save_upload(upload)
+        except (TypeError, ValueError) as exc:
+            return error_response(str(exc))
+        except Exception as exc:
+            logger.exception("订阅管理页面上传渲染头像失败")
+            return error_response(
+                f"上传渲染头像失败：{type(exc).__name__}", status_code=500
+            )
+        self.dynamic_listener.clear_render_cache()
+        return json_response(result)
+
+    async def page_logo_reset(self):
+        """删除自定义渲染头像并恢复默认图片。"""
+        try:
+            result = await self.logo_service.reset()
+        except Exception as exc:
+            logger.exception("订阅管理页面恢复默认渲染头像失败")
+            return error_response(
+                f"恢复默认头像失败：{type(exc).__name__}", status_code=500
+            )
+        self.dynamic_listener.clear_render_cache()
+        return json_response(result)
 
     async def page_up_info(self, uid: str):
         """按需查询 UP 主公开资料，供页面新增/编辑订阅时预览。"""
@@ -416,8 +473,8 @@ class Main(Star):
         filter_desc += f"<br>@特定订阅者人数: {at_sub_users_len}"
         return filter_desc
 
-    @staticmethod
     def _build_subscription_payload(
+        self,
         uid: int,
         name: str,
         sex: str,
@@ -429,7 +486,7 @@ class Main(Star):
         return RenderPayload(
             uid=str(uid),
             name="AstrBot",
-            avatar=image_to_base64(LOGO_PATH),
+            avatar=image_to_base64(self.logo_service.get_active_path()),
             text=f"📣 订阅成功！<br>UP 主: {name} | 性别: {sex}{filter_desc}",
             image_urls=[avatar] if avatar else [],
             url=link,
@@ -621,7 +678,7 @@ class Main(Star):
 
             payload = RenderPayload(
                 name="AstrBot",
-                avatar=image_to_base64(LOGO_PATH),
+                avatar=image_to_base64(self.logo_service.get_active_path()),
                 title=info["title"],
                 text=(
                     f"UP 主: {info['owner']['name']}<br>"

@@ -3,7 +3,7 @@
 
   const bridge = window.AstrBotPluginPage;
   const $ = (selector) => document.querySelector(selector);
-  const state = { subscriptions: [], selectedUmo: null, search: "", sessionSearch: "", upCache: new Map(), editing: null, returnFocus: null, confirmAction: null };
+  const state = { subscriptions: [], selectedUmo: null, search: "", sessionSearch: "", upCache: new Map(), editing: null, returnFocus: null, confirmAction: null, logoFile: null, logoPreviewUrl: "" };
   const typeNames = {
     video: "过滤视频", draw: "过滤图文", article: "过滤专栏",
     forward: "过滤转发", lottery: "过滤抽奖", live: "过滤直播",
@@ -16,6 +16,8 @@
     resultCount: $("#result-count"), caption: $("#selected-session-caption"), deleteSession: $("#delete-session-button"),
     drawer: $("#subscription-drawer"), drawerBackdrop: $("#drawer-backdrop"), form: $("#subscription-form"), formMessage: $("#form-message"),
     drawerTitle: $("#drawer-title"), drawerKicker: $("#drawer-kicker"), upPreview: $("#up-preview"),
+    logoPreview: $("#logo-preview"), logoStatus: $("#logo-status"), logoInput: $("#logo-file"), logoFileName: $("#logo-file-name"),
+    chooseLogo: $("#choose-logo"), uploadLogo: $("#upload-logo"), resetLogo: $("#reset-logo"),
     confirm: $("#confirm-dialog"), confirmTitle: $("#confirm-title"), confirmDescription: $("#confirm-description")
   };
 
@@ -27,6 +29,11 @@
   function apiGet(route) {
     if (!bridge || typeof bridge.apiGet !== "function") throw new Error("AstrBot Plugin Page bridge 不可用。");
     return bridge.apiGet(route);
+  }
+
+  function apiUpload(route, file) {
+    if (!bridge || typeof bridge.upload !== "function") throw new Error("当前 AstrBot 版本不支持文件上传。");
+    return bridge.upload(route, file);
   }
 
   function apiPost(route, payload) {
@@ -177,6 +184,80 @@
     }));
   }
 
+  function renderLogo(payload) {
+    const data = unwrap(payload) || {};
+    elements.logoStatus.className = "logo-status";
+    if (data.data_url) elements.logoPreview.src = data.data_url;
+    elements.resetLogo.disabled = !data.customized;
+    elements.logoStatus.textContent = data.customized
+      ? `已使用自定义图片${data.width && data.height ? `（${data.width}×${data.height}）` : ""}`
+      : "当前使用插件默认图片";
+  }
+
+  async function loadLogo() {
+    try {
+      renderLogo(await apiGet("logo"));
+    } catch (error) {
+      elements.logoStatus.textContent = error.message || "无法读取当前图片";
+      elements.logoStatus.className = "logo-status error-text";
+    }
+  }
+
+  function handleLogoFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      elements.logoStatus.textContent = "图片不能超过 5 MB。";
+      elements.logoStatus.className = "logo-status error-text";
+      event.target.value = "";
+      return;
+    }
+    if (state.logoPreviewUrl) URL.revokeObjectURL(state.logoPreviewUrl);
+    state.logoFile = file;
+    state.logoPreviewUrl = URL.createObjectURL(file);
+    elements.logoPreview.src = state.logoPreviewUrl;
+    elements.logoFileName.textContent = file.name;
+    elements.uploadLogo.disabled = false;
+    elements.logoStatus.className = "logo-status";
+    elements.logoStatus.textContent = "已选择图片，点击上传并应用。";
+  }
+
+  async function uploadLogo() {
+    if (!state.logoFile) return;
+    elements.uploadLogo.disabled = true;
+    elements.chooseLogo.disabled = true;
+    elements.logoStatus.className = "logo-status";
+    elements.logoStatus.textContent = "正在上传并处理…";
+    try {
+      renderLogo(await apiUpload("logo/upload", state.logoFile));
+      elements.logoFileName.textContent = "未选择新图片";
+      elements.logoInput.value = "";
+      if (state.logoPreviewUrl) URL.revokeObjectURL(state.logoPreviewUrl);
+      state.logoFile = null; state.logoPreviewUrl = "";
+      toast("渲染头像已更新。");
+    } catch (error) {
+      elements.logoStatus.className = "logo-status error-text";
+      elements.logoStatus.textContent = error.message || "上传失败，请稍后重试。";
+    } finally {
+      elements.chooseLogo.disabled = false;
+      elements.uploadLogo.disabled = !state.logoFile;
+    }
+  }
+
+  async function resetLogo() {
+    try {
+      renderLogo(await apiPost("logo/reset", {}));
+      elements.logoFileName.textContent = "未选择新图片";
+      elements.logoInput.value = "";
+      if (state.logoPreviewUrl) URL.revokeObjectURL(state.logoPreviewUrl);
+      state.logoFile = null; state.logoPreviewUrl = "";
+      elements.uploadLogo.disabled = true;
+      toast("已恢复默认渲染头像。");
+    } catch (error) {
+      toast(error.message || "恢复默认头像失败，请稍后重试。", true);
+    }
+  }
+
   async function load() {
     elements.loading.hidden = false; elements.table.hidden = true; elements.empty.hidden = true;
     setConnection("", "正在同步");
@@ -269,7 +350,11 @@
 
   $("#create-button").addEventListener("click", (event) => openDrawer(null, event.currentTarget));
   document.querySelectorAll(".empty-create").forEach((button) => button.addEventListener("click", (event) => openDrawer(null, event.currentTarget)));
-  $("#refresh-button").addEventListener("click", load);
+  $("#refresh-button").addEventListener("click", () => { load(); loadLogo(); });
+  elements.chooseLogo.addEventListener("click", () => elements.logoInput.click());
+  elements.logoInput.addEventListener("change", handleLogoFile);
+  elements.uploadLogo.addEventListener("click", uploadLogo);
+  elements.resetLogo.addEventListener("click", () => confirm({ title: "恢复默认渲染头像？", description: "将删除当前自定义图片，后续卡片恢复使用插件默认头像。", action: resetLogo, buttonText: "恢复默认" }));
   $("#session-filter").addEventListener("input", (event) => { state.sessionSearch = event.target.value; renderSessions(); });
   $("#subscription-search").addEventListener("input", (event) => { state.search = event.target.value; renderTable(); });
   elements.sessionList.addEventListener("click", (event) => { const option = event.target.closest("[data-umo]"); if (!option) return; state.selectedUmo = option.dataset.umo; state.search = ""; $("#subscription-search").value = ""; renderSessions(); renderTable(); hydrateUpNames().then(() => renderTable()).catch(() => {}); });
@@ -286,7 +371,7 @@
     }
     try {
       await bridge.ready();
-      await load();
+      await Promise.all([load(), loadLogo()]);
     } catch (error) {
       console.error("Plugin Page 初始化失败", error);
       setConnection("error", "连接失败");

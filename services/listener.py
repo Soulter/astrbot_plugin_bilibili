@@ -59,12 +59,14 @@ class DynamicListener:
         renderer: Renderer,
         dispatcher: SubscriptionNotificationDispatcher,
         cfg: dict,
+        logo_path_provider=None,
     ):
         self.context = context
         self.data_manager = data_manager
         self.bili_client = bili_client
         self.renderer = renderer
         self.dispatcher = dispatcher
+        self.logo_path_provider = logo_path_provider or (lambda: LOGO_PATH)
         self.interval_secs = max(1, int(cfg.get("interval_secs", 300)))
         self.task_gap_secs = self._parse_float(cfg.get("task_gap_secs"), 20, minimum=0)
         self.rai = cfg.get("rai", True)
@@ -79,6 +81,10 @@ class DynamicListener:
         self.enable_ai_summary = bool(cfg.get("enable_ai_summary", False))
         self.ai_summary_prompt = (cfg.get("ai_summary_prompt", "") or "").strip()
         self.ai_summary_cache: OrderedDict[str, str] = OrderedDict()
+
+    def clear_render_cache(self) -> None:
+        """清理已渲染消息缓存，使头像等全局视觉设置立即生效。"""
+        self.render_cache.clear()
 
     async def start(self):
         """启动后台监听循环（按 UID 任务池调度）。"""
@@ -845,7 +851,7 @@ class DynamicListener:
         return RenderPayload(
             banner=image_to_base64(BANNER_PATH),
             name="AstrBot",
-            avatar=image_to_base64(LOGO_PATH),
+            avatar=image_to_base64(self.logo_path_provider()),
             title=str(live_room.get("title", "Unknown") or "Unknown"),
             url=link,
             qrcode=create_qrcode(link),
