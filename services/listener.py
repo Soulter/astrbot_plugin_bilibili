@@ -844,8 +844,9 @@ class DynamicListener:
         is_live_ended = (not is_live_now) and sub_data.is_live
         return is_live_now, is_live_started, is_live_ended
 
-    @staticmethod
-    def _build_live_payload(live_room: Dict[str, Any], text: str) -> RenderPayload:
+    def _build_live_payload(
+        self, live_room: Dict[str, Any], text: str
+    ) -> RenderPayload:
         room_id = int(live_room.get("room_id", 0) or 0)
         link = f"https://live.bilibili.com/{room_id}"
         return RenderPayload(

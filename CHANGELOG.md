@@ -1,3 +1,6 @@
+# v1.7.2
+- 修复自定义头像功能导致直播开播/下播推送报 `NameError` 的问题。[issue#114](https://github.com/Soulter/astrbot_plugin_bilibili/issues/114)
+
 # v1.7.1
 - 修复订阅管理页面无法订阅长UID的用户的问题。[issue#112](https://github.com/Soulter/astrbot_plugin_bilibili/issues/112)
 - 支持在订阅管理页面上传或恢复渲染卡片使用的自定义头像。[issue#113](https://github.com/Soulter/astrbot_plugin_bilibili/issues/113)
