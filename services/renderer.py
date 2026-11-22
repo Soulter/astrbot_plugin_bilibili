@@ -1,5 +1,6 @@
 import asyncio
 import os
+from inspect import signature
 from typing import Any, Dict
 
 from astrbot.api import logger
@@ -60,10 +61,24 @@ class Renderer:
             target_style = DEFAULT_TEMPLATE
         return self._templates.get(target_style, "")
 
-    async def render_dynamic(self, payload: RenderPayload, style: str | None = None):
-        """
-        将渲染数据字典渲染成最终图片。
-        这是该类的主要入口方法。
+    async def render_dynamic(
+        self,
+        payload: RenderPayload,
+        style: str | None = None,
+        *,
+        umo: str | None = None,
+        attempts: int = MAX_ATTEMPTS,
+    ) -> str | None:
+        """Render a card using the selected template.
+
+        Args:
+            payload: Contents of the card.
+            style: Optional template override.
+            umo: Session whose rendering endpoint should be used when supported.
+            attempts: Maximum number of calls to the renderer.
+
+        Returns:
+            A validated image path, or None if rendering failed.
         """
         # options = {"full_page": True, "type": "png", "quality": None, "scale": "device"}
         options = {
@@ -77,8 +92,11 @@ class Renderer:
 
         tmpl = self.get_template(style)
         context = payload.to_template_context()
+        render_kwargs = {}
+        if umo is not None and "umo" in signature(self.star.html_render).parameters:
+            render_kwargs["umo"] = umo
 
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             render_output = None
             try:
                 render_output = await self.star.html_render(
@@ -86,6 +104,7 @@ class Renderer:
                     data=context,
                     return_url=False,
                     options=options,
+                    **render_kwargs,
                 )
                 if (
                     render_output
@@ -97,7 +116,7 @@ class Renderer:
             except Exception as e:
                 logger.error(f"渲染图片失败 (尝试次数: {attempt}): {e}")
 
-            if attempt < MAX_ATTEMPTS:
+            if attempt < attempts:
                 await asyncio.sleep(RETRY_DELAY)
 
         return None  # 所有尝试都失败

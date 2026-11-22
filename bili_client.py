@@ -202,7 +202,7 @@ class BiliClient:
         """Fetch current live room information for the requested users.
 
         Args:
-            uids: Bilibili user IDs to look up.
+            uids: One batch of Bilibili user IDs to look up.
 
         Returns:
             Live room records keyed by UID as a string. Users without room data
@@ -219,17 +219,17 @@ class BiliClient:
             "params": {"uids[]": "list<int>: 主播uid列表"},
             "comment": "通过主播uid列表获取直播间状态信息（是否在直播、房间号等）",
         }
-        live_rooms: dict[str, dict[str, Any]] = {}
-        batch_size = 50  # Keep query strings short when UIDs have many digits.
-        for start in range(0, len(uids), batch_size):
-            params = {"uids[]": uids[start : start + batch_size]}
-            resp = await Api(**API_CONFIG, no_csrf=True).update_params(**params).result
-            if resp == []:
-                continue  # Bilibili returns an empty list when no rooms are found.
-            if not isinstance(resp, dict):
-                raise ValueError("Unexpected Bilibili live status response")
-            live_rooms.update(resp)
-        return live_rooms
+        if not uids:
+            return {}
+        params = {"uids[]": uids}
+        resp = await Api(**API_CONFIG, no_csrf=True).update_params(**params).result
+        if resp == []:
+            return {}  # Bilibili returns an empty list when no rooms are found.
+        if not isinstance(resp, dict) or any(
+            not isinstance(room, dict) for room in resp.values()
+        ):
+            raise ValueError("Unexpected Bilibili live status response")
+        return resp
 
     async def get_user_info(self, uid: int) -> Tuple[Dict[str, Any] | None, str]:
         """
