@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import time
+from html import escape
 from pathlib import Path
 from typing import List, Tuple
 
@@ -49,6 +50,7 @@ from .core.models import RenderPayload, SubscriptionRecord
 from .core.utils import (
     create_qrcode,
     image_to_base64,
+    is_height_valid,
     is_valid_umo,
     parse_bilibili_uid,
 )
@@ -843,7 +845,8 @@ class Main(Star):
             logger.warning(f"Failed to query Bilibili live status: {exc}")
             return MessageEventResult().message("暂时查不到 B 站直播状态，请稍后再试。")
 
-        lines = []
+        result = MessageEventResult(use_t2i_=False)
+        lines = ["正在直播的 UP 主"]
         for uid in uids:
             room = rooms.get(str(uid))
             if not room or room.get("live_status") != 1:
@@ -856,11 +859,27 @@ class Main(Star):
                 if room_id
                 else "直播间链接暂不可用"
             )
+            if self.rai and room_id and room.get("cover_from_user"):
+                try:
+                    payload = self.dynamic_listener.build_live_payload(
+                        room, f"UP 主「{escape(str(name))}」正在直播"
+                    )
+                    payload.title = str(title)
+                    img_path = await self.renderer.render_dynamic(payload)
+                except (OSError, ValueError) as exc:
+                    logger.warning(f"Failed to build Bilibili live card: {exc}")
+                else:
+                    if img_path and is_height_valid(
+                        img_path, event.get_platform_name()
+                    ):
+                        result.message("\n\n".join(lines) + "\n\n").file_image(img_path)
+                        lines = [link]
+                        continue
             lines.append(f"{name} · {title}\n{link}")
 
-        if not lines:
+        if not result.chain and len(lines) == 1:
             return MessageEventResult().message("本群订阅的 UP 主目前没有人在直播。")
-        return MessageEventResult().message("正在直播的 UP 主\n\n" + "\n\n".join(lines))
+        return result.message("\n\n".join(lines))
 
     @command("bili_sub_del", alias={"订阅删除"})
     async def sub_del(self, event: AstrMessageEvent, uid: str):

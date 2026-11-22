@@ -845,9 +845,16 @@ class DynamicListener:
         is_live_ended = (not is_live_now) and sub_data.is_live
         return is_live_now, is_live_started, is_live_ended
 
-    def _build_live_payload(
-        self, live_room: Dict[str, Any], text: str
-    ) -> RenderPayload:
+    def build_live_payload(self, live_room: dict[str, Any], text: str) -> RenderPayload:
+        """Build the live card shared by notifications and room queries.
+
+        Args:
+            live_room: Room details returned by Bilibili.
+            text: HTML content describing the live status.
+
+        Returns:
+            Card data with the room cover and link.
+        """
         room_id = int(live_room.get("room_id", 0) or 0)
         link = f"https://live.bilibili.com/{room_id}"
         return RenderPayload(
@@ -1013,7 +1020,7 @@ class DynamicListener:
             if "live_end" in sub_data.filter_types:
                 return
         if text:
-            payload = self._build_live_payload(live_room, text)
+            payload = self.build_live_payload(live_room, text)
             with_atall = await self._check_atall_permission(
                 sub_user,
                 bool(sub_data.live_atall or sub_data.at_all) and is_live_started,
