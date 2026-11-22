@@ -817,6 +817,51 @@ class Main(Star):
                     ret += f"   {'｜'.join(filters)}\n"
             return MessageEventResult().message(ret)
 
+    @command("bili_live")
+    async def list_live_subscriptions(
+        self, event: AstrMessageEvent
+    ) -> MessageEventResult:
+        """Report which Bilibili creators this group follows are live.
+
+        Args:
+            event: Message that invoked the command.
+
+        Returns:
+            The live rooms or a message explaining why none can be shown.
+        """
+        if not event.get_group_id():
+            return MessageEventResult().message("请在群聊中使用 /bili_live。")
+
+        subs = self.data_manager.get_subscriptions_by_user(event.unified_msg_origin)
+        if not subs:
+            return MessageEventResult().message("本群还没有订阅 UP 主。")
+
+        uids = list(dict.fromkeys(sub.uid for sub in subs))
+        try:
+            rooms = await self.bili_client.get_live_info_by_uids(uids)
+        except Exception as exc:
+            logger.warning(f"Failed to query Bilibili live status: {exc}")
+            return MessageEventResult().message("暂时查不到 B 站直播状态，请稍后再试。")
+
+        lines = []
+        for uid in uids:
+            room = rooms.get(str(uid))
+            if not room or room.get("live_status") != 1:
+                continue
+            name = room.get("uname") or f"UID {uid}"
+            title = room.get("title") or "（无标题）"
+            room_id = room.get("room_id")
+            link = (
+                f"https://live.bilibili.com/{room_id}"
+                if room_id
+                else "直播间链接暂不可用"
+            )
+            lines.append(f"{name} · {title}\n{link}")
+
+        if not lines:
+            return MessageEventResult().message("本群订阅的 UP 主目前没有人在直播。")
+        return MessageEventResult().message("正在直播的 UP 主\n\n" + "\n\n".join(lines))
+
     @command("bili_sub_del", alias={"订阅删除"})
     async def sub_del(self, event: AstrMessageEvent, uid: str):
         """删除 bilibili 动态监控"""

@@ -185,7 +185,8 @@ class DynamicListener:
         live_room = None
         if should_check_live:
             try:
-                live_room = await self.bili_client.get_live_info_by_uids([uid])
+                rooms = await self.bili_client.get_live_info_by_uids([uid])
+                live_room = rooms.get(str(uid))
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -248,8 +249,8 @@ class DynamicListener:
             return
 
         if live_room is None and not shared_payload:
-            # lives = await self.bili_client.get_live_info(uid)
-            live_room = await self.bili_client.get_live_info_by_uids([uid])
+            rooms = await self.bili_client.get_live_info_by_uids([uid])
+            live_room = rooms.get(str(uid))
         if live_room:
             await self._handle_live_status(sub_user, sub_data, live_room)
 
