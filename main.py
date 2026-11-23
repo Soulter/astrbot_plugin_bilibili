@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import time
+from html import escape
 from pathlib import Path
 from typing import List, Tuple
 
@@ -49,6 +50,7 @@ from .core.models import RenderPayload, SubscriptionRecord
 from .core.utils import (
     create_qrcode,
     image_to_base64,
+    is_height_valid,
     is_valid_umo,
     parse_bilibili_uid,
 )
@@ -62,6 +64,9 @@ from .tools.bgm_daily import BgmDailyTool
 from .tools.bgm_subject import BgmAdvancedSubjectSearchTool, BgmRecommendHotSubjectsTool
 from .tools.bili_hot_video import BiliSearchHotVideosTool
 from .tools.bili_user_dynamics import BiliUserDynamicsTool
+
+LIVE_QUERY_BATCH_SIZE = 50
+LIVE_QUERY_RENDER_SECONDS = 8
 
 
 @register("astrbot_plugin_bilibili", "Soulter", "", "", "")
@@ -816,6 +821,128 @@ class Main(Star):
                 if filters:
                     ret += f"   {'｜'.join(filters)}\n"
             return MessageEventResult().message(ret)
+
+    @command("bili_live")
+    async def list_live_subscriptions(
+        self, event: AstrMessageEvent
+    ) -> MessageEventResult:
+        """Report which Bilibili creators this group follows are live.
+
+        Args:
+            event: Message that invoked the command.
+
+        Returns:
+            The live rooms or a message explaining why none can be shown.
+        """
+        result = MessageEventResult(use_t2i_=False)
+        group_id = event.get_group_id()
+        if not group_id:
+            return result.message("请在群聊中使用 /bili_live。")
+
+        platform = event.get_platform_name()
+        umo = event.unified_msg_origin
+        if platform == "aiocqhttp":
+            # OneBot may store subscriptions under a member-specific group session.
+            prefix = f"{event.get_platform_id()}:GroupMessage:"
+            umo = f"{prefix}{group_id}"
+            group_session = re.compile(
+                rf"{re.escape(prefix)}(?:[0-9]+_)?{re.escape(str(group_id))}"
+            )
+            subs = (
+                sub
+                for session, records in self.data_manager.get_all_subscriptions().items()
+                if group_session.fullmatch(session)
+                for sub in records
+            )
+        else:
+            subs = self.data_manager.get_subscriptions_by_user(umo) or []
+        uids = list(dict.fromkeys(sub.uid for sub in subs))
+        if not uids:
+            return result.message("本群还没有订阅 UP 主。")
+
+        live_rooms = []
+        failed = 0
+        for start in range(0, len(uids), LIVE_QUERY_BATCH_SIZE):
+            batch = uids[start : start + LIVE_QUERY_BATCH_SIZE]
+            try:
+                rooms = await self.bili_client.get_live_info_by_uids(batch)
+            except Exception as exc:
+                logger.warning(f"Failed to query Bilibili live status: {exc}")
+                failed += len(batch)
+                continue
+            for uid in batch:
+                room = rooms.get(str(uid))
+                if room and room.get("live_status") == 1:
+                    live_rooms.append((uid, room))
+
+        if live_rooms:
+            result = await self._live_rooms_result(live_rooms, platform, umo)
+            if failed:
+                result.message(f"\n\n另有 {failed} 位 UP 主的直播状态暂时查不到。")
+            return result
+        if failed == len(uids):
+            return result.message("暂时查不到 B 站直播状态，请稍后再试。")
+        if failed:
+            return result.message(
+                f"已查到的 UP 主都没在直播，另有 {failed} 位暂时查不到。"
+            )
+        return result.message("本群订阅的 UP 主目前没有人在直播。")
+
+    async def _live_rooms_result(
+        self, live_rooms: list[tuple[int, dict]], platform: str, umo: str
+    ) -> MessageEventResult:
+        """Build the reply with a shared time budget for all cover cards.
+
+        Args:
+            live_rooms: Live UIDs and room details in subscription order.
+            platform: Adapter type used to check image limits.
+            umo: Group or topic session for the render endpoint.
+
+        Returns:
+            Cards and text with each link next to its room.
+        """
+        result = MessageEventResult(use_t2i_=False)
+        lines = ["正在直播的 UP 主"]
+        deadline = time.monotonic() + LIVE_QUERY_RENDER_SECONDS
+        render_covers = self.rai
+        for uid, room in live_rooms:
+            name = room.get("uname") or f"UID {uid}"
+            title = room.get("title") or "（无标题）"
+            room_id = room.get("room_id")
+            link = (
+                f"https://live.bilibili.com/{room_id}"
+                if room_id
+                else "直播间链接暂不可用"
+            )
+            if (
+                render_covers
+                and room_id
+                and room.get("cover_from_user")
+                and time.monotonic() < deadline
+            ):
+                try:
+                    payload = self.dynamic_listener.build_live_payload(
+                        room, f"UP 主「{escape(str(name))}」正在直播"
+                    )
+                    payload.title = str(title)
+                    img_path = await asyncio.wait_for(
+                        self.renderer.render_dynamic(payload, umo=umo, attempts=1),
+                        timeout=deadline - time.monotonic(),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"Failed to render Bilibili live card for UID {uid}: {exc!r}"
+                    )
+                    img_path = None
+                if not img_path:
+                    render_covers = False
+                elif is_height_valid(img_path, platform):
+                    result.message("\n\n".join(lines) + "\n\n").file_image(img_path)
+                    lines = [link]
+                    continue
+            lines.append(f"{name} · {title}\n{link}")
+
+        return result.message("\n\n".join(lines))
 
     @command("bili_sub_del", alias={"订阅删除"})
     async def sub_del(self, event: AstrMessageEvent, uid: str):

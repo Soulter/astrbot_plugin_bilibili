@@ -198,7 +198,19 @@ class BiliClient:
             logger.error(f"获取直播间信息失败 (UID: {uid}): {e}")
             return None
 
-    async def get_live_info_by_uids(self, uids: list[int]) -> Optional[Dict[str, Any]]:
+    async def get_live_info_by_uids(self, uids: list[int]) -> dict[str, dict[str, Any]]:
+        """Fetch current live room information for the requested users.
+
+        Args:
+            uids: One batch of Bilibili user IDs to look up.
+
+        Returns:
+            Live room records keyed by UID as a string. Users without room data
+            are omitted.
+
+        Raises:
+            ValueError: Bilibili returned an unexpected response format.
+        """
         self._apply_proxy()
         API_CONFIG = {
             "url": "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids",
@@ -207,12 +219,17 @@ class BiliClient:
             "params": {"uids[]": "list<int>: 主播uid列表"},
             "comment": "通过主播uid列表获取直播间状态信息（是否在直播、房间号等）",
         }
-        params: Dict[str, list[int]] = {"uids[]": uids}
+        if not uids:
+            return {}
+        params = {"uids[]": uids}
         resp = await Api(**API_CONFIG, no_csrf=True).update_params(**params).result
-        if not isinstance(resp, dict) or not resp:
-            return None
-        live_room = next(iter(resp.values()))
-        return live_room
+        if resp == []:
+            return {}  # Bilibili returns an empty list when no rooms are found.
+        if not isinstance(resp, dict) or any(
+            not isinstance(room, dict) for room in resp.values()
+        ):
+            raise ValueError("Unexpected Bilibili live status response")
+        return resp
 
     async def get_user_info(self, uid: int) -> Tuple[Dict[str, Any] | None, str]:
         """
